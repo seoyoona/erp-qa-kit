@@ -23,3 +23,17 @@ htmlcov/
 
 # Generated QA context (created by the toolkit at runtime)
 qa-context/
+
+# Demo seed qa-context inputs are part of the release fixture.
+!examples/pipe-manufacturing-demo/qa-context/
+examples/pipe-manufacturing-demo/qa-context/*
+!examples/pipe-manufacturing-demo/qa-context/entity_map.yaml
+!examples/pipe-manufacturing-demo/qa-context/flow_map.yaml
+!examples/pipe-manufacturing-demo/qa-context/rules/
+examples/pipe-manufacturing-demo/qa-context/rules/*
+!examples/pipe-manufacturing-demo/qa-context/rules/pipe_manufacturing_rules.yaml
+!examples/pipe-manufacturing-demo/qa-context/rules/README.md
+!examples/pipe-manufacturing-demo/qa-context/feedback/
+examples/pipe-manufacturing-demo/qa-context/feedback/*
+!examples/pipe-manufacturing-demo/qa-context/feedback/feedback_items.yaml
+!examples/pipe-manufacturing-demo/qa-context/feedback/PM_FEEDBACK_TEMPLATE.md

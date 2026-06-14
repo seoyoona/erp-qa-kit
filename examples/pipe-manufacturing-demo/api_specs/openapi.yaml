@@ -1,0 +1,24 @@
+openapi: 3.0.0
+info:
+  title: Pipe Manufacturing Demo API
+  version: "0.1"
+paths:
+  /inventory/receipts/{receipt_id}/confirm:
+    post:
+      summary: Confirm a purchase receipt and record inventory movement
+      responses:
+        "200":
+          description: Receipt confirmed
+  /shipments/{shipment_id}/confirm:
+    post:
+      summary: Confirm shipment and reduce inventory
+      responses:
+        "200":
+          description: Shipment confirmed
+  /production/results/{production_result_id}/complete:
+    post:
+      summary: Complete production output
+      responses:
+        "200":
+          description: Production result completed
+

@@ -1,0 +1,178 @@
+rules:
+  - rule_id: inv_receipt_creates_movement
+    name: Confirmed receipt must have inventory movement
+    module: inventory
+    flow: inv_receipt_confirm
+    severity: BLOCKER
+    verification_type: DB_ASSERTION
+    description: "Every confirmed receipt must have an inventory movement tied to the receipt."
+    expected_result: "Zero rows: every confirmed receipt has a matching inventory movement."
+    required_entities: [PurchaseReceipt, InventoryMovement]
+    required_tables: [tbl_purchase_receipt, tbl_inventory_movement]
+    sql: |
+      SELECT r.receipt_id
+      FROM tbl_purchase_receipt r
+      LEFT JOIN tbl_inventory_movement m
+        ON m.ref_doc_type = 'PURCHASE_RECEIPT'
+       AND m.ref_doc_id = r.receipt_id
+       AND m.movement_type = 'RECEIPT'
+      WHERE r.receipt_status = 'confirmed'
+        AND m.movement_id IS NULL;
+    source: "rule pack: pipe manufacturing inventory integrity"
+    confidence: high
+    needs_human_confirmation: false
+  - rule_id: inv_no_negative_stock
+    name: Stock quantity must not be negative
+    module: inventory
+    flow: shipment_confirm
+    severity: BLOCKER
+    verification_type: DB_ASSERTION
+    description: "On-hand stock must never be negative for any item and warehouse."
+    expected_result: "Zero rows: no negative balances exist."
+    required_entities: [InventoryBalance]
+    required_tables: [tbl_inventory_balance]
+    sql: |
+      SELECT item_id, warehouse_id, on_hand_qty
+      FROM tbl_inventory_balance
+      WHERE on_hand_qty < 0;
+    source: "rule pack: pipe manufacturing inventory integrity"
+    confidence: high
+    needs_human_confirmation: false
+  - rule_id: inv_shipment_decreases_stock
+    name: Shipment confirmation must decrease stock
+    module: inventory
+    flow: shipment_confirm
+    severity: BLOCKER
+    verification_type: DB_ASSERTION
+    description: "Every confirmed shipment must have a negative inventory movement."
+    expected_result: "Zero rows: every confirmed shipment has a negative movement."
+    required_entities: [Shipment, InventoryMovement]
+    required_tables: [tbl_shipment, tbl_inventory_movement]
+    sql: |
+      SELECT s.shipment_id
+      FROM tbl_shipment s
+      LEFT JOIN tbl_inventory_movement m
+        ON m.ref_doc_type = 'SHIPMENT'
+       AND m.ref_doc_id = s.shipment_id
+       AND m.movement_type = 'SHIPMENT_CONFIRM'
+      WHERE s.shipment_status = 'confirmed'
+        AND (m.movement_id IS NULL OR m.quantity >= 0);
+    source: "rule pack: pipe manufacturing shipment integrity"
+    confidence: high
+    needs_human_confirmation: false
+  - rule_id: inv_shipment_cancel_restores_stock
+    name: Shipment cancellation must restore stock
+    module: inventory
+    flow: shipment_cancel
+    severity: MAJOR
+    verification_type: DB_ASSERTION
+    description: "Every cancelled shipment must have a positive reversing inventory movement."
+    expected_result: "Zero rows: every cancelled shipment has a positive reversing movement."
+    required_entities: [Shipment, InventoryMovement]
+    required_tables: [tbl_shipment, tbl_inventory_movement]
+    sql: |
+      SELECT s.shipment_id
+      FROM tbl_shipment s
+      LEFT JOIN tbl_inventory_movement m
+        ON m.ref_doc_type = 'SHIPMENT'
+       AND m.ref_doc_id = s.shipment_id
+       AND m.movement_type = 'SHIPMENT_CANCEL'
+      WHERE s.shipment_status = 'cancelled'
+        AND (m.movement_id IS NULL OR m.quantity <= 0);
+    source: "rule pack: pipe manufacturing shipment integrity"
+    confidence: medium
+    needs_human_confirmation: true
+  - rule_id: po_receipt_updates_received_qty
+    name: Confirmed goods receipt must update purchase order received quantity
+    module: purchase
+    flow: inv_receipt_confirm
+    severity: MAJOR
+    verification_type: DB_ASSERTION
+    description: "Purchase order received quantity must cover confirmed receipt quantity."
+    expected_result: "Zero rows: confirmed receipts are reflected in purchase order received quantity."
+    required_entities: [PurchaseOrder, PurchaseReceipt]
+    required_tables: [tbl_purchase_order, tbl_purchase_receipt]
+    sql: |
+      SELECT r.receipt_id, r.purchase_order_id, r.receipt_qty, po.received_qty
+      FROM tbl_purchase_receipt r
+      JOIN tbl_purchase_order po
+        ON po.purchase_order_id = r.purchase_order_id
+      WHERE r.receipt_status = 'confirmed'
+        AND po.received_qty < r.receipt_qty;
+    source: "rule pack: pipe manufacturing purchase integrity"
+    confidence: high
+    needs_human_confirmation: false
+  - rule_id: po_cancelled_blocks_receipt
+    name: Cancelled purchase order must not allow receipt
+    module: purchase
+    flow: purchase_order_cancelled_receipt_block
+    severity: BLOCKER
+    verification_type: DB_ASSERTION
+    description: "A cancelled purchase order must not have confirmed receipts."
+    expected_result: "Zero rows: no confirmed receipt exists for a cancelled purchase order."
+    required_entities: [PurchaseOrder, PurchaseReceipt]
+    required_tables: [tbl_purchase_order, tbl_purchase_receipt]
+    sql: |
+      SELECT r.receipt_id, r.purchase_order_id
+      FROM tbl_purchase_receipt r
+      JOIN tbl_purchase_order po
+        ON po.purchase_order_id = r.purchase_order_id
+      WHERE po.status = 'cancelled'
+        AND r.receipt_status = 'confirmed';
+    source: "rule pack: pipe manufacturing purchase integrity"
+    confidence: medium
+    needs_human_confirmation: true
+  - rule_id: prod_completion_creates_movement
+    name: Completed production result must create inventory movement
+    module: production
+    flow: production_result_complete
+    severity: BLOCKER
+    verification_type: DB_ASSERTION
+    description: "Every completed production result must have a finished goods inventory movement."
+    expected_result: "Zero rows: every completed production result has a finished goods movement."
+    required_entities: [ProductionResult, InventoryMovement]
+    required_tables: [tbl_production_result, tbl_inventory_movement]
+    sql: |
+      SELECT pr.production_result_id
+      FROM tbl_production_result pr
+      LEFT JOIN tbl_inventory_movement m
+        ON m.ref_doc_type = 'PRODUCTION_RESULT'
+       AND m.ref_doc_id = pr.production_result_id
+       AND m.movement_type = 'PRODUCTION_COMPLETE'
+      WHERE pr.result_status = 'completed'
+        AND m.movement_id IS NULL;
+    source: "rule pack: pipe manufacturing production integrity"
+    confidence: medium
+    needs_human_confirmation: true
+  - rule_id: prod_good_defect_equals_total
+    name: Good quantity plus defect quantity must equal total output
+    module: production
+    flow: production_result_complete
+    severity: MAJOR
+    verification_type: DB_ASSERTION
+    description: "Production result quantity components must reconcile to total output."
+    expected_result: "Zero rows: good quantity plus defect quantity equals total output quantity."
+    required_entities: [ProductionResult]
+    required_tables: [tbl_production_result]
+    sql: |
+      SELECT production_result_id, total_output_qty, good_qty, defect_qty
+      FROM tbl_production_result
+      WHERE total_output_qty <> good_qty + defect_qty;
+    source: "rule pack: pipe manufacturing production integrity"
+    confidence: high
+    needs_human_confirmation: false
+  - rule_id: prod_output_within_work_order_qty
+    name: Production output must not exceed work order quantity unless explicitly allowed
+    module: production
+    flow: production_result_complete
+    severity: MAJOR
+    verification_type: DB_ASSERTION
+    description: "Production output should not exceed work-order planned quantity unless the work order allows over-output."
+    expected_result: "Zero rows: completed output is within the planned work-order quantity unless over-output is allowed."
+    required_entities: [ProductionResult, WorkOrder]
+    required_tables: [tbl_production_result, tbl_work_order]
+    sql: null
+    source: "rule pack: pipe manufacturing production integrity; schema relation requires human confirmation"
+    confidence: low
+    needs_human_confirmation: true
+

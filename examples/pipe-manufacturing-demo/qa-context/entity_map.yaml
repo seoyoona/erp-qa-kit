@@ -1,0 +1,86 @@
+entities:
+  - entity: InventoryBalance
+    physical_table: tbl_inventory_balance
+    module: inventory
+    type: master
+    primary_key: [item_id, warehouse_id]
+    important_columns: [item_id, warehouse_id, on_hand_qty]
+    status_columns: []
+    quantity_columns: [on_hand_qty]
+    amount_columns: []
+    source: "db_schema/schema.sql"
+    confidence: high
+    needs_human_confirmation: false
+  - entity: InventoryMovement
+    physical_table: tbl_inventory_movement
+    module: inventory
+    type: movement
+    primary_key: [movement_id]
+    important_columns: [item_id, warehouse_id, movement_type, ref_doc_type, ref_doc_id]
+    status_columns: [movement_status]
+    quantity_columns: [quantity]
+    amount_columns: []
+    source: "db_schema/schema.sql + screen_specs/inventory_receipt.md"
+    confidence: high
+    needs_human_confirmation: false
+  - entity: PurchaseOrder
+    physical_table: tbl_purchase_order
+    module: purchase
+    type: transaction
+    primary_key: [purchase_order_id]
+    important_columns: [item_id, ordered_qty, received_qty]
+    status_columns: [status]
+    quantity_columns: [ordered_qty, received_qty]
+    amount_columns: []
+    source: "db_schema/schema.sql"
+    confidence: high
+    needs_human_confirmation: false
+  - entity: PurchaseReceipt
+    physical_table: tbl_purchase_receipt
+    module: purchase
+    type: transaction
+    primary_key: [receipt_id]
+    important_columns: [purchase_order_id, item_id, receipt_qty]
+    status_columns: [receipt_status]
+    quantity_columns: [receipt_qty]
+    amount_columns: []
+    source: "db_schema/schema.sql + screen_specs/inventory_receipt.md"
+    confidence: high
+    needs_human_confirmation: false
+  - entity: Shipment
+    physical_table: tbl_shipment
+    module: inventory
+    type: transaction
+    primary_key: [shipment_id]
+    important_columns: [item_id, warehouse_id, shipped_qty]
+    status_columns: [shipment_status]
+    quantity_columns: [shipped_qty]
+    amount_columns: []
+    source: "db_schema/schema.sql + screen_specs/shipment.md"
+    confidence: high
+    needs_human_confirmation: false
+  - entity: WorkOrder
+    physical_table: tbl_work_order
+    module: production
+    type: transaction
+    primary_key: [work_order_id]
+    important_columns: [item_id, planned_qty, allow_over_output]
+    status_columns: [status]
+    quantity_columns: [planned_qty]
+    amount_columns: []
+    source: "db_schema/schema.sql"
+    confidence: high
+    needs_human_confirmation: false
+  - entity: ProductionResult
+    physical_table: tbl_production_result
+    module: production
+    type: transaction
+    primary_key: [production_result_id]
+    important_columns: [work_order_id, item_id, total_output_qty, good_qty, defect_qty]
+    status_columns: [result_status]
+    quantity_columns: [total_output_qty, good_qty, defect_qty]
+    amount_columns: []
+    source: "db_schema/schema.sql + screen_specs/production_result.md"
+    confidence: medium
+    needs_human_confirmation: true
+

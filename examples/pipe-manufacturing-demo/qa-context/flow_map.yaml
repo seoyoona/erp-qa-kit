@@ -1,0 +1,83 @@
+flows:
+  - flow_id: inv_receipt_confirm
+    name: Confirm Goods Receipt
+    module: inventory
+    steps:
+      - "Open inventory receipt screen"
+      - "Confirm receipt"
+      - "System records inventory movement"
+      - "System updates purchase order received quantity"
+    trigger_screen: inventory_receipt
+    user_action: confirm_receipt
+    related_entities: [PurchaseReceipt, PurchaseOrder, InventoryMovement]
+    affected_tables: [tbl_purchase_receipt, tbl_purchase_order, tbl_inventory_movement]
+    status_transitions: ["receipt: draft -> confirmed"]
+    downstream_side_effects: ["stock quantity increases", "purchase order received_qty increases"]
+    source: "screen_specs/inventory_receipt.md"
+    confidence: high
+    needs_human_confirmation: false
+  - flow_id: shipment_confirm
+    name: Confirm Shipment
+    module: inventory
+    steps:
+      - "Open shipment screen"
+      - "Confirm shipment"
+      - "System records outbound inventory movement"
+    trigger_screen: shipment
+    user_action: confirm_shipment
+    related_entities: [Shipment, InventoryMovement, InventoryBalance]
+    affected_tables: [tbl_shipment, tbl_inventory_movement, tbl_inventory_balance]
+    status_transitions: ["shipment: draft -> confirmed"]
+    downstream_side_effects: ["stock quantity decreases"]
+    source: "screen_specs/shipment.md"
+    confidence: high
+    needs_human_confirmation: false
+  - flow_id: shipment_cancel
+    name: Cancel Shipment
+    module: inventory
+    steps:
+      - "Open confirmed shipment"
+      - "Cancel shipment"
+      - "System records reversing inventory movement"
+    trigger_screen: shipment
+    user_action: cancel_shipment
+    related_entities: [Shipment, InventoryMovement, InventoryBalance]
+    affected_tables: [tbl_shipment, tbl_inventory_movement, tbl_inventory_balance]
+    status_transitions: ["shipment: confirmed -> cancelled"]
+    downstream_side_effects: ["stock quantity is restored"]
+    source: "screen_specs/shipment.md"
+    confidence: medium
+    needs_human_confirmation: true
+  - flow_id: production_result_complete
+    name: Complete Production Result
+    module: production
+    steps:
+      - "Open production result screen"
+      - "Complete production result"
+      - "System records finished goods movement"
+    trigger_screen: production_result
+    user_action: complete_production_result
+    related_entities: [ProductionResult, WorkOrder, InventoryMovement]
+    affected_tables: [tbl_production_result, tbl_work_order, tbl_inventory_movement]
+    status_transitions: ["production_result: draft -> completed"]
+    downstream_side_effects: ["finished goods stock increases"]
+    source: "screen_specs/production_result.md"
+    confidence: medium
+    needs_human_confirmation: true
+  - flow_id: purchase_order_cancelled_receipt_block
+    name: Block Receipt for Cancelled Purchase Order
+    module: purchase
+    steps:
+      - "Open purchase receipt screen"
+      - "Choose cancelled purchase order"
+      - "System blocks receipt confirmation"
+    trigger_screen: inventory_receipt
+    user_action: confirm_receipt
+    related_entities: [PurchaseOrder, PurchaseReceipt]
+    affected_tables: [tbl_purchase_order, tbl_purchase_receipt]
+    status_transitions: ["purchase_order: open -> cancelled"]
+    downstream_side_effects: ["receipt confirmation is blocked"]
+    source: "docs/requirements.md + screen_specs/inventory_receipt.md"
+    confidence: medium
+    needs_human_confirmation: true
+

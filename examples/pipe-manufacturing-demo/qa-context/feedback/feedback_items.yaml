@@ -1,0 +1,23 @@
+feedback_items:
+  - feedback_id: fb_shipment_cancel_restore
+    title: "Shipment cancel did not restore stock"
+    module: inventory
+    related_flow: shipment_cancel
+    related_rule_id: inv_shipment_cancel_restores_stock
+    severity: MAJOR
+    user_observed_behavior: "After cancelling a confirmed shipment, stock stayed reduced."
+    expected_behavior: "Cancelling a confirmed shipment restores stock through a reversing inventory movement."
+    actual_behavior: "Stock balance stayed reduced after cancellation."
+    reproduction_steps:
+      - "Confirm a shipment for a stocked item."
+      - "Cancel the same shipment."
+      - "Review the inventory movement list and stock balance."
+    evidence: "demo observation: shipment_id=SHIP-DEMO-001"
+    affected_records: ["shipment_id=SHIP-DEMO-001"]
+    suspected_area: "inventory shipment cancellation handler"
+    ai_fix_instruction: "Ensure the cancellation path records a positive reversing inventory movement and refreshes stock balance."
+    validation_after_fix: "Regenerate SQL and run rule inv_shipment_cancel_restores_stock against a reviewed local test database outside ERP QA Kit; expect zero rows."
+    source: "PM feedback template example"
+    confidence: medium
+    needs_human_confirmation: true
+

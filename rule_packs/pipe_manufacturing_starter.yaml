@@ -1,0 +1,19 @@
+rules:
+  - rule_id: starter_stock_not_negative
+    name: Stock quantity must not be negative
+    module: inventory
+    flow: shipment_confirm
+    severity: BLOCKER
+    verification_type: DB_ASSERTION
+    description: "Starter rule for inventory balance validation."
+    expected_result: "Zero rows means no negative stock."
+    required_entities: [InventoryBalance]
+    required_tables: [tbl_inventory_balance]
+    sql: |
+      SELECT item_id, warehouse_id, on_hand_qty
+      FROM tbl_inventory_balance
+      WHERE on_hand_qty < 0;
+    source: "starter rule pack"
+    confidence: high
+    needs_human_confirmation: false
+
