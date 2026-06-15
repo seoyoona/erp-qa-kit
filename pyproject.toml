@@ -4,17 +4,21 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "erp-qa-kit"
-version = "0.1.0"
+version = "0.2.0"
 description = "Local file-based ERP data-integrity QA toolkit"
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
   "PyYAML>=6,<7",
+  "openpyxl>=3.1,<4",
 ]
+
+[project.optional-dependencies]
+pandas = ["pandas"]
+markitdown = ["markitdown"]
 
 [project.scripts]
 erpqa = "erpqa.cli:main"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-

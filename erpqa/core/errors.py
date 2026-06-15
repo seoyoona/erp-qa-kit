@@ -9,9 +9,8 @@ class UsageError(ErpqaError):
 
 
 class WriteOutsideQaContextError(ErpqaError):
-    exit_code = 1
+    exit_code = 3
 
 
 class ValidationFailed(ErpqaError):
     exit_code = 1
-

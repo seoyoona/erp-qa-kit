@@ -335,5 +335,30 @@ def validate_project(project_path: str | Path) -> list[ValidationIssue]:
         issues.extend(validate_rules_file(file))
     issues.extend(validate_feedback(qa_path / "feedback" / "feedback_items.yaml"))
     issues.extend(_cross_reference_issues(qa_path))
-    return issues
+    modules_dir = qa_path / "modules"
+    if modules_dir.exists():
+        from .contracts import validate_contract_file
+        from .policy import validate_policy_document
 
+        project_policy = load_yaml(qa_path / "project_policy.yaml")
+        if project_policy is not None:
+            for message in validate_policy_document(qa_path / "project_policy.yaml", project_policy):
+                issues.append(_issue(qa_path / "project_policy.yaml", "qa_policy", "policy", message))
+        for module_dir in sorted(path for path in modules_dir.iterdir() if path.is_dir()):
+            module_policy = load_yaml(module_dir / "module_policy.yaml")
+            if module_policy is not None:
+                for message in validate_policy_document(
+                    module_dir / "module_policy.yaml",
+                    module_policy,
+                    module=True,
+                    project_policy=project_policy if isinstance(project_policy, dict) else {},
+                ):
+                    issues.append(_issue(module_dir / "module_policy.yaml", "qa_policy", "policy", message))
+            for contract in (
+                "screen_contract.yaml",
+                "frontend_contract.yaml",
+                "backend_contract.yaml",
+                "procedure_contract.yaml",
+            ):
+                issues.extend(validate_contract_file(module_dir / contract))
+    return issues

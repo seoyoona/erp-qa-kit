@@ -1,0 +1,26 @@
+{
+  "screen_id": "ORD_LIST",
+  "screen_name": "Order Inquiry",
+  "module": "ORD",
+  "sections": {
+    "visible_text": [
+      {"key": "title_label", "label": "Order Inquiry", "visible": true, "required": false, "order": 1}
+    ],
+    "search_filters": [
+      {"key": "order_date", "label": "Order Date", "visible": true, "required": false, "order": 1, "data_type": "date"}
+    ],
+    "grid_columns": [
+      {"key": "order_no", "label": "Order No.", "visible": true, "required": true, "order": 1, "data_type": "string"},
+      {"key": "customer_code", "label": "Customer", "visible": true, "required": true, "order": 2, "data_type": "string"}
+    ],
+    "form_fields": [
+      {"key": "customer_code", "label": "Customer", "visible": true, "required": true, "readonly_disabled": false, "data_type": "string"}
+    ],
+    "buttons_actions": [
+      {"key": "btn_search", "label": "Search", "visible": true, "required": false, "order": 1}
+    ],
+    "hidden_fields": [
+      {"key": "internal_seq", "label": "Internal Sequence", "visible": false, "required": false}
+    ]
+  }
+}
