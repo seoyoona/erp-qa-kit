@@ -197,42 +197,56 @@ def resolve_spec_file(spec_root: Path, screen_id: str) -> Path | None:
     return None
 
 
+def _is_module_dir(d: Path) -> bool:
+    return d.is_dir() and bool(list(d.glob("*.py")))
+
+
 def resolve_backend_module(backend_root: Path, screen_id: str) -> Path | None:
-    key = _norm(screen_id)  # e.g. pdtosc001m
-    best = None
-    for d in sorted(p for p in backend_root.rglob("*") if p.is_dir()):
-        if _norm(d.name) == key or _norm(d.name) in {key, key.replace("pdt", "")}:
+    """Match by screen-id code. Exact normalized match first, then a sorted-char
+    multiset match so a spec/code transposition like `PRG` vs dir `pgr` still binds
+    `PDT_PRG_003M` -> `pdt_pgr_003m` (the digits are part of the multiset, so 003
+    never collides with 004)."""
+    key = _norm(screen_id)            # e.g. pdtprg003m
+    ksorted = sorted(key)
+    multiset: Path | None = None
+    for d in sorted(p for p in backend_root.rglob("*") if _is_module_dir(p)):
+        nd = _norm(d.name)
+        if nd == key:
             return d
-        if key.endswith(_norm(d.name)) and len(_norm(d.name)) >= 8:
-            best = d
-    return best
+        if multiset is None and len(nd) == len(key) and sorted(nd) == ksorted:
+            multiset = d
+    return multiset
 
 
 _SP_BASE_RE = re.compile(r"\b(str_\w+?)_(?:S|IU|I|U|D)\b")
 
 
 def resolve_backend_by_sps(backend_root: Path, sp_names: list[str]) -> Path | None:
-    """Resolve the backend module by matching the spec's stored-procedure names
-    against backend source — robust to screen-id naming differences (e.g. spec
-    `PRG` vs backend dir `pgr`)."""
-    bases: set[str] = set()
-    for name in sp_names:
-        base = name.rsplit(".", 1)[-1]
-        m = _SP_BASE_RE.match(base + "_S") or _SP_BASE_RE.search(base)
-        bases.add(re.sub(r"_(?:S|IU|I|U|D)(?:_\d+)?$", "", base))
+    """Fallback resolver (used when the screen-id code doesn't match a module):
+    bind by stored-procedure names, weighting each SP by *specificity* (inverse
+    document frequency). A generic SP shared by many modules counts for little; a
+    unique SP that appears in only one module is decisive. This avoids the
+    over-binding where several 진행현황 screens collapse onto one module via a
+    common procedure."""
+    bases = {re.sub(r"_(?:S|IU|I|U|D)(?:_\d+)?$", "", n.rsplit(".", 1)[-1]) for n in sp_names}
     bases = {b for b in bases if b}
     if not bases:
         return None
-    counts: dict[Path, int] = {}
-    for d in sorted(p for p in backend_root.rglob("*") if p.is_dir()):
-        pys = list(d.glob("*.py"))
-        if not pys:
-            continue
-        text = "\n".join(p.read_text(encoding="utf-8", errors="replace") for p in pys)
-        hits = sum(1 for b in bases if b in text)
-        if hits:
-            counts[d] = hits
-    return max(counts, key=counts.get) if counts else None
+    contains: dict[Path, set[str]] = {}
+    for d in sorted(p for p in backend_root.rglob("*") if _is_module_dir(p)):
+        text = "\n".join(p.read_text(encoding="utf-8", errors="replace") for p in d.glob("*.py"))
+        hit = {b for b in bases if b in text}
+        if hit:
+            contains[d] = hit
+    if not contains:
+        return None
+    df = {b: sum(1 for s in contains.values() if b in s) for b in bases}
+    best, best_score = None, 0.0
+    for d, hit in contains.items():
+        score = sum(1.0 / df[b] for b in hit if df.get(b))
+        if score > best_score:
+            best, best_score = d, score
+    return best
 
 
 def resolve_frontend_files(frontend_root: Path, backend: BackendModule, screen_id: str) -> tuple[list[Path], Path | None]:

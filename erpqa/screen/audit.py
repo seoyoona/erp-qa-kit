@@ -62,10 +62,11 @@ def run_screen_audit(project_path: str | Path, module: str, screen_id: str) -> d
         raise ErpqaError(f"no spec xlsx found for screen {screen_id} under {roots['spec']}")
 
     spec = extract_spec_screen(spec_file, screen_id)
-    # Resolve backend by stored-procedure names first (robust to PRG↔pgr style
-    # naming differences), then fall back to screen-id normalization.
+    # Resolve backend by the screen-id code first (exact, then transposition-tolerant
+    # so PDT_PRG_003M -> pdt_pgr_003m), then fall back to specificity-weighted SP
+    # matching for screens whose id does not map to a module.
     sp_names = [sp["proc"] for sp in spec.sps]
-    backend_dir = resolve_backend_by_sps(roots["backend"], sp_names) or resolve_backend_module(roots["backend"], screen_id)
+    backend_dir = resolve_backend_module(roots["backend"], screen_id) or resolve_backend_by_sps(roots["backend"], sp_names)
     if backend_dir is None:
         raise ErpqaError(f"no backend module found for screen {screen_id} under {roots['backend']}")
 
