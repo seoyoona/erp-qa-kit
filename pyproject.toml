@@ -20,5 +20,8 @@ markitdown = ["markitdown"]
 [project.scripts]
 erpqa = "erpqa.cli:main"
 
+[tool.setuptools.packages.find]
+include = ["erpqa*"]
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]

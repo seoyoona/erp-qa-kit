@@ -185,6 +185,17 @@ def cmd_module_audit(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_screen_audit(args: argparse.Namespace) -> int:
+    from erpqa.screen.audit import write_screen_audit
+
+    project = _existing_project(args.project_path)
+    load_context(project, args.module)
+    contract, report = write_screen_audit(project, args.module, args.screen)
+    print(f"Wrote {contract}")
+    print(f"Wrote {report}")
+    return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="erpqa", description="ERP QA Kit local CLI")
     subparsers = parser.add_subparsers(dest="command", required=True)
@@ -206,12 +217,15 @@ def build_parser() -> argparse.ArgumentParser:
         "module-report": ("Generate module mismatch reports", cmd_module_report, True),
         "module-handoff": ("Generate module frontend fix handoff", cmd_module_handoff, True),
         "module-audit": ("Run module audit end-to-end", cmd_module_audit, True),
+        "screen-audit": ("Audit one screen (spec SP fields vs frontend, v0.3)", cmd_screen_audit, True),
     }
     for name, (help_text, func, needs_module) in commands.items():
         sub = subparsers.add_parser(name, help=help_text, description=help_text)
         sub.add_argument("project_path", help="Path to the target ERP project folder")
         if needs_module:
             sub.add_argument("--module", required=True, help="Module name")
+        if name == "screen-audit":
+            sub.add_argument("--screen", required=True, help="Screen id, e.g. PDT-OSC-001M")
         sub.set_defaults(func=func)
     return parser
 
