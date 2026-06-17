@@ -54,11 +54,18 @@ _PARAM_RE = re.compile(r"@(\w+)\s*=")
 _SCREEN_ID_RE = re.compile(r"\bPDT[-_][A-Z0-9]+[-_]?\d+M\b", re.IGNORECASE)
 
 
+_ROLE_SUFFIX_RE = re.compile(r"^(IU|S|I|U|D)\d*$")  # S, S2, S4, IU, IU2 ...
+
+
 def _role_from_proc(proc: str) -> str:
     base = proc.rsplit(".", 1)[-1]
     base = re.sub(r"_\d{6,}$", "", base)  # strip dated suffix e.g. _20251217
     suffix = base.rsplit("_", 1)[-1].upper()
-    return suffix if suffix in {"S", "IU", "I", "U", "D"} else "OTHER"
+    # Numbered query/save variants (`_S2`, `_S4`, `_IU2`) carry the same role as
+    # their base — only the trailing digits differ — so map them back, otherwise
+    # their params (filters / save fields) are silently lost as OTHER.
+    m = _ROLE_SUFFIX_RE.match(suffix)
+    return m.group(1) if m else "OTHER"
 
 
 def extract_spec_screen(xlsx_path: Path, screen_id: str | None = None) -> SpecScreen:
@@ -136,6 +143,28 @@ _MUT_RE = re.compile(r"use(Create|Update|Delete|Insert)\w*Mutation", re.IGNORECA
 
 
 _IMPORT_RE = re.compile(r"""from\s+['"]([^'"]+)['"]""")
+# Imports of the shared zod models / api adapters the copy-step rule must include.
+_SHARED_IMPORT_RE = re.compile(r"(?:^|[@/])(models|adapters)/", re.IGNORECASE)
+
+
+def _is_shared_import(spec: str) -> bool:
+    return bool(_SHARED_IMPORT_RE.search(spec))
+
+
+def _shared_fragment(spec: str) -> str | None:
+    """The `models/...` or `adapters/...` tail of a shared import, alias/relative
+    prefix stripped — e.g. `@/models/raw-material` -> `models/raw-material`."""
+    m = _SHARED_IMPORT_RE.search(spec)
+    return spec[m.start(1):] if m else None
+
+
+def _shared_import_present(frag: str, slice_paths: list[str]) -> bool:
+    """A shared import is satisfied if any slice file resolves it as a FILE
+    (`.../models/raw-material.ts`) or as a DIRECTORY/index
+    (`.../models/sales-summary/index.ts`). Matching on the path fragment — not the
+    bare stem — avoids false 'missing' on directory-organized shared modules."""
+    needle = "/" + frag
+    return any((needle + "." in sp) or (needle + "/" in sp) for sp in slice_paths)
 _ZOD_OBJ_OPEN_RE = re.compile(r"(\w+)\s*=\s*z\.object\(")
 _ZOD_KEY_RE = re.compile(r"^\s*(\w+)\s*:\s*z\.")
 _GRID_FIELD_RE = re.compile(r"""\bfield\s*:\s*['"](\w+)['"]""")
@@ -201,21 +230,32 @@ def _is_module_dir(d: Path) -> bool:
     return d.is_dir() and bool(list(d.glob("*.py")))
 
 
+def _alpha_digit_key(s: str) -> tuple[tuple[str, ...], str]:
+    """Split a normalized id into (sorted-letters, digits-in-original-order).
+    Letters are a multiset so a spec/code transposition like `PRG` vs dir `pgr`
+    still matches, but digits keep their sequence so neither 003-vs-004 NOR the
+    digit-anagram 010-vs-001 can collide."""
+    n = _norm(s)
+    letters = tuple(sorted(c for c in n if c.isalpha()))
+    digits = "".join(c for c in n if c.isdigit())
+    return letters, digits
+
+
 def resolve_backend_module(backend_root: Path, screen_id: str) -> Path | None:
-    """Match by screen-id code. Exact normalized match first, then a sorted-char
-    multiset match so a spec/code transposition like `PRG` vs dir `pgr` still binds
-    `PDT_PRG_003M` -> `pdt_pgr_003m` (the digits are part of the multiset, so 003
-    never collides with 004)."""
+    """Match by screen-id code. Exact normalized match first, then a
+    letters-multiset + digits-in-order match so a spec/code transposition like
+    `PRG` vs dir `pgr` still binds `PDT_PRG_003M` -> `pdt_pgr_003m`, while the
+    ordered digits keep 003≠004 and 010≠001 (digit anagrams) from colliding."""
     key = _norm(screen_id)            # e.g. pdtprg003m
-    ksorted = sorted(key)
-    multiset: Path | None = None
+    kkey = _alpha_digit_key(screen_id)
+    transposed: Path | None = None
     for d in sorted(p for p in backend_root.rglob("*") if _is_module_dir(p)):
         nd = _norm(d.name)
         if nd == key:
             return d
-        if multiset is None and len(nd) == len(key) and sorted(nd) == ksorted:
-            multiset = d
-    return multiset
+        if transposed is None and _alpha_digit_key(d.name) == kkey:
+            transposed = d
+    return transposed
 
 
 _SP_BASE_RE = re.compile(r"\b(str_\w+?)_(?:S|IU|I|U|D)\b")
@@ -249,11 +289,26 @@ def resolve_backend_by_sps(backend_root: Path, sp_names: list[str]) -> Path | No
     return best
 
 
-def resolve_frontend_files(frontend_root: Path, backend: BackendModule, screen_id: str) -> tuple[list[Path], Path | None]:
+def resolve_frontend_files(
+    frontend_root: Path,
+    backend: BackendModule,
+    screen_id: str,
+    feature_dir: Path | None = None,
+) -> tuple[list[Path], Path | None, set[str]]:
     """A screen's frontend files are spread across feature/<slug>, models/,
     hooks/<slug>, adapters/. Seed from files that reference the backend's stored
     procedures (or screen id), then follow their imports to pull in the model and
-    hook files (where the zod fields and mutations live)."""
+    hook files (where the zod fields and mutations live).
+
+    When ``feature_dir`` is given (an explicit screen→frontend binding), the seed
+    is anchored deterministically to every file under that directory instead of
+    discovered by SP/id heuristics — imports are still followed across
+    ``frontend_root`` so shared ``src/models/`` is pulled in.
+
+    Returns ``(files, anchor_dir, missing_shared)`` where ``missing_shared`` is the
+    set of shared ``@/models`` / ``@/adapters`` import specifiers a seed file
+    references but that are absent from the slice — the precise signal that the
+    copy-step rule was violated (only ``feature-*/`` was copied)."""
     sp_bases: set[str] = set()
     for py in Path(backend.module_dir).rglob("*.py"):
         for m in re.findall(r"(str_\w+?)_(?:IU|S|D)", py.read_text(encoding="utf-8", errors="replace")):
@@ -266,18 +321,38 @@ def resolve_frontend_files(frontend_root: Path, backend: BackendModule, screen_i
 
     seed: list[Path] = []
     anchor_dir: Path | None = None
-    for ts in all_ts:
-        src = ts.read_text(encoding="utf-8", errors="replace")
-        if any(b in src for b in sp_bases) or _norm(screen_id) in _norm(src):
-            seed.append(ts)
-            if anchor_dir is None and ts.name.endswith("Controller.tsx"):
-                anchor_dir = ts.parent
+    if feature_dir is not None:
+        anchor_dir = feature_dir
+        seed = sorted(p for p in (list(feature_dir.rglob("*.ts")) + list(feature_dir.rglob("*.tsx"))))
+    else:
+        for ts in all_ts:
+            src = ts.read_text(encoding="utf-8", errors="replace")
+            if any(b in src for b in sp_bases) or _norm(screen_id) in _norm(src):
+                seed.append(ts)
+                if anchor_dir is None and ts.name.endswith("Controller.tsx"):
+                    anchor_dir = ts.parent
 
+    slice_paths = [p.as_posix() for p in all_ts]
     cluster: dict[Path, None] = {p: None for p in seed}
+    missing_shared: set[str] = set()
     for ts in seed:                       # follow imports to model/hook files
         src = ts.read_text(encoding="utf-8", errors="replace")
         for imp in _IMPORT_RE.findall(src):
             stem = imp.rsplit("/", 1)[-1]
-            for target in by_stem.get(stem, []):
+            targets = by_stem.get(stem, [])
+            for target in targets:
                 cluster.setdefault(target, None)
-    return list(cluster), anchor_dir
+            if targets or not _is_shared_import(imp):
+                continue
+            # No file-stem match: resolve the shared import by path fragment so a
+            # directory/index import still counts. Pull its index files into the
+            # cluster; only flag missing when nothing in the slice resolves it —
+            # that is the genuine copy-step violation (feature-only copy).
+            frag = _shared_fragment(imp)
+            if frag and _shared_import_present(frag, slice_paths):
+                for p in all_ts:
+                    if ("/" + frag + "/") in p.as_posix():
+                        cluster.setdefault(p, None)
+            else:
+                missing_shared.add(imp)
+    return list(cluster), anchor_dir, missing_shared

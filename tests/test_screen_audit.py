@@ -4,11 +4,22 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from erpqa.screen.audit import _clean_key, _DYNAMIC_COL_RE
+from erpqa.screen.audit import (
+    _clean_key,
+    _DYNAMIC_COL_RE,
+    _resolve_binding_path,
+    _screen_binding,
+    run_screen_audit,
+)
 from erpqa.screen.extractors import (
+    BackendModule,
+    _is_shared_import,
     _role_from_proc,
     extract_frontend_feature,
     extract_spec_screen,
+    resolve_backend_by_sps,
+    resolve_backend_module,
+    resolve_frontend_files,
 )
 
 
@@ -36,6 +47,13 @@ class RoleTests(unittest.TestCase):
         self.assertEqual(_role_from_proc("MISPD.dbo.str_PDMaterialInput_IU"), "IU")
         self.assertEqual(_role_from_proc("str_PDMaterialInput_S"), "S")
         self.assertEqual(_role_from_proc("str_PDMaterialInput_D_20251217"), "D")
+
+    def test_numbered_query_save_variants_map_to_base_role(self):
+        # `_S2`/`_S4`/`_IU2` are numbered variants of the same role, not OTHER.
+        self.assertEqual(_role_from_proc("str_PDPlanItemProduct_S2"), "S")
+        self.assertEqual(_role_from_proc("str_PDPRGB01900_S4"), "S")
+        self.assertEqual(_role_from_proc("str_Demo_IU2"), "IU")
+        self.assertEqual(_role_from_proc("str_Demo_Report"), "OTHER")
 
 
 class FrontendExtractTests(unittest.TestCase):
@@ -72,6 +90,194 @@ class SpecExtractTests(unittest.TestCase):
             spec = extract_spec_screen(path, "PDT-OSC-001M")
             self.assertEqual(spec.params_for_role("IU"), ["iInYmd", "iInQty", "iLotNo"])
             self.assertEqual(spec.params_for_role("S"), ["iPlanYm"])
+
+
+def _mk_backend_dir(root, name, body="x = 1\n"):
+    d = root / name
+    d.mkdir(parents=True)
+    (d / "service.py").write_text(body, encoding="utf-8")
+    return d
+
+
+class ResolveBackendModuleTests(unittest.TestCase):
+    def test_exact_normalized_match(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            _mk_backend_dir(root, "pdt_osc_001m")
+            self.assertEqual(resolve_backend_module(root, "PDT-OSC-001M").name, "pdt_osc_001m")
+
+    def test_transposition_binds_prg_to_pgr(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            _mk_backend_dir(root, "pdt_pgr_003m")
+            self.assertEqual(resolve_backend_module(root, "PDT_PRG_003M").name, "pdt_pgr_003m")
+
+    def test_digits_do_not_collide_003_vs_004(self):
+        # The over-binding bug: 003 must not resolve to a 004-only module.
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            _mk_backend_dir(root, "pdt_pgr_004m")
+            self.assertIsNone(resolve_backend_module(root, "PDT_PRG_003M"))
+
+    def test_digit_anagram_does_not_collide_010_vs_001(self):
+        # Digits keep their sequence: 010 must not transposition-match a 001 module
+        # (sorted-multiset would have wrongly treated {0,1,0} == {0,0,1}).
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            _mk_backend_dir(root, "pdt_pgr_001m")
+            self.assertIsNone(resolve_backend_module(root, "PDT_PRG_010M"))
+            # but the real 010 module still binds via transposition
+            _mk_backend_dir(root, "pdt_pgr_010m")
+            self.assertEqual(resolve_backend_module(root, "PDT_PRG_010M").name, "pdt_pgr_010m")
+
+
+class ResolveBackendBySpsTests(unittest.TestCase):
+    def test_unique_sp_outweighs_shared_generic_sp(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            # Both modules contain the generic shared SP; only one has the unique SP.
+            _mk_backend_dir(root, "mod_a", "q = 'str_Common_S'\n")
+            _mk_backend_dir(root, "mod_b", "q = 'str_Common_S'\nu = 'str_Unique003_S'\n")
+            picked = resolve_backend_by_sps(root, ["str_Common_S", "str_Unique003_S"])
+            self.assertEqual(picked.name, "mod_b")
+
+
+class ScreenBindingTests(unittest.TestCase):
+    def test_screen_binding_matches_on_normalized_id(self):
+        manifest = {"screen_bindings": {"PDT_PRG_003M": {"backend": "b", "frontend": "f"}}}
+        self.assertEqual(_screen_binding(manifest, "PDT-PRG-003M"), {"backend": "b", "frontend": "f"})
+        self.assertEqual(_screen_binding(manifest, "PDT_XXX_999M"), {})
+
+    def test_resolve_binding_path_prefers_root_then_project(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp) / "backend"
+            (root / "pdt_pgr_003m").mkdir(parents=True)
+            got = _resolve_binding_path("pdt_pgr_003m", root, Path(tmp))
+            self.assertEqual(got, (root / "pdt_pgr_003m").resolve())
+            self.assertIsNone(_resolve_binding_path("nope", root, Path(tmp)))
+            self.assertIsNone(_resolve_binding_path(None, root))
+
+
+class CopyStepRuleTests(unittest.TestCase):
+    def test_is_shared_import(self):
+        self.assertTrue(_is_shared_import("@/models/raw-material"))
+        self.assertTrue(_is_shared_import("@/adapters/api/client"))
+        self.assertTrue(_is_shared_import("../../models/foo"))
+        self.assertFalse(_is_shared_import("./localThing"))
+        self.assertFalse(_is_shared_import("react"))
+
+    def _backend_with_sp(self, tmp, sp="str_Demo"):
+        d = Path(tmp) / "be"
+        d.mkdir()
+        (d / "svc.py").write_text(f"q = '{sp}_S'\n", encoding="utf-8")
+        return BackendModule(module_dir=str(d))
+
+    def test_missing_shared_model_is_detected(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            fe = Path(tmp) / "fe"
+            (fe / "feature").mkdir(parents=True)
+            # seed references the SP base, and imports a shared model not in the slice
+            (fe / "feature" / "Controller.tsx").write_text(
+                "import { z } from 'zod';\n"
+                "import { schema } from '@/models/raw-material';\n"
+                "const q = 'str_Demo_S';\n", encoding="utf-8")
+            backend = self._backend_with_sp(tmp)
+            files, anchor, missing = resolve_frontend_files(fe, backend, "PDT-X-001M")
+            self.assertIn("@/models/raw-material", missing)
+
+    def test_present_shared_model_is_not_flagged(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            fe = Path(tmp) / "fe"
+            (fe / "feature").mkdir(parents=True)
+            (fe / "models").mkdir(parents=True)
+            (fe / "models" / "raw-material.ts").write_text(
+                "export const schema = z.object({ a: z.string() });\n", encoding="utf-8")
+            (fe / "feature" / "Controller.tsx").write_text(
+                "import { schema } from '@/models/raw-material';\n"
+                "const q = 'str_Demo_S';\n", encoding="utf-8")
+            backend = self._backend_with_sp(tmp)
+            files, anchor, missing = resolve_frontend_files(fe, backend, "PDT-X-001M")
+            self.assertEqual(missing, set())
+
+
+class _Fixture:
+    """Build a minimal project where one screen-id does NOT map to any module dir,
+    forcing the sp-fallback path (the unreliable resolution)."""
+
+    def __init__(self, tmp, screen_id="PDT-PRG-003M", bind=False, name_suffix="progress"):
+        from openpyxl import Workbook
+        import yaml
+
+        self.project = Path(tmp)
+        mod = "PDT"
+        qa = self.project / "qa-context" / "modules" / mod
+        qa.mkdir(parents=True)
+        backend_root = self.project / "extracted" / mod / "backend"
+        # module dir name shares no id-code with the screen -> id-code resolve fails.
+        bdir = backend_root / "legacy_progress_module"
+        bdir.mkdir(parents=True)
+        (bdir / "svc.py").write_text("q = 'str_PgrCommon_S'\n", encoding="utf-8")
+        fe_root = self.project / "extracted" / mod / "frontend"
+        fe_root.mkdir(parents=True)
+        (fe_root / "model.ts").write_text(
+            "export const zItemSchema = z.object({ plan_ym: z.string() });\n", encoding="utf-8"
+        )
+        spec_root = self.project / "extracted" / mod / "spec"
+        spec_root.mkdir(parents=True)
+        wb = Workbook()
+        ws = wb.active
+        ws["A1"] = screen_id
+        ws["A2"] = "exec MISPD.dbo.str_PgrCommon_S @iPlanYm='202501'"
+        wb.save(spec_root / f"{screen_id}_{name_suffix}.xlsx")
+        manifest = {"module": mod, "source_roots": {
+            "spec": [f"extracted/{mod}/spec"], "frontend": [f"extracted/{mod}/frontend"],
+            "backend": [f"extracted/{mod}/backend"]}}
+        if bind:
+            manifest["screen_bindings"] = {screen_id: {
+                "backend": f"extracted/{mod}/backend/legacy_progress_module",
+                "frontend": f"extracted/{mod}/frontend"}}
+        (qa / "module_manifest.yaml").write_text(yaml.safe_dump(manifest), encoding="utf-8")
+        self.module = mod
+        self.screen_id = screen_id
+
+
+class ResolutionHonestyTests(unittest.TestCase):
+    def test_sp_fallback_is_flagged_low_confidence(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            fx = _Fixture(tmp, bind=False)
+            r = run_screen_audit(fx.project, fx.module, fx.screen_id)
+            self.assertEqual(r["resolution"]["method"], "sp-fallback")
+            self.assertTrue(r["resolution"]["uncertain"])
+            types = [f["mismatch_type"] for f in r["findings"]]
+            self.assertIn("ScreenResolutionLowConfidence", types)
+            self.assertTrue(all(f.get("confidence") == "low" for f in r["findings"]))
+
+    def test_explicit_binding_is_deterministic_and_trusted(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            fx = _Fixture(tmp, bind=True)
+            r = run_screen_audit(fx.project, fx.module, fx.screen_id)
+            self.assertEqual(r["resolution"]["method"], "explicit")
+            self.assertFalse(r["resolution"]["uncertain"])
+            types = [f["mismatch_type"] for f in r["findings"]]
+            self.assertNotIn("ScreenResolutionLowConfidence", types)
+
+
+class SaveSpecCoverageTests(unittest.TestCase):
+    def test_save_screen_without_save_sp_is_flagged(self):
+        # Spec name says 등록 but carries only an S proc -> save dimension can't be
+        # evaluated; must surface SaveSpecExampleMissing, not silent CLEAN.
+        with tempfile.TemporaryDirectory() as tmp:
+            fx = _Fixture(tmp, bind=True, name_suffix="생산계획등록")
+            r = run_screen_audit(fx.project, fx.module, fx.screen_id)
+            types = [f["mismatch_type"] for f in r["findings"]]
+            self.assertIn("SaveSpecExampleMissing", types)
+
+    def test_query_only_screen_is_not_flagged(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            fx = _Fixture(tmp, bind=True, name_suffix="진행현황")
+            r = run_screen_audit(fx.project, fx.module, fx.screen_id)
+            types = [f["mismatch_type"] for f in r["findings"]]
+            self.assertNotIn("SaveSpecExampleMissing", types)
 
 
 if __name__ == "__main__":

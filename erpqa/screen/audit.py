@@ -1,12 +1,14 @@
 from __future__ import annotations
 
 import re
+import unicodedata
 from pathlib import Path
 
 from erpqa.core.errors import ErpqaError, UsageError
 from erpqa.core.module_paths import write_module_text, write_module_yaml
 from erpqa.core.yaml_io import load_yaml
 from erpqa.screen.extractors import (
+    _norm,
     extract_backend_module,
     extract_frontend_feature,
     extract_spec_screen,
@@ -40,10 +42,15 @@ def _fe_has(clean: str, fe_keys: set[str]) -> bool:
     return clean in fe_keys or clean.replace("_", "") in flat
 
 
-def _roots_from_manifest(project_path: Path, module: str) -> dict[str, Path]:
+def _load_manifest(project_path: Path, module: str) -> dict:
     manifest = load_yaml(project_path / "qa-context" / "modules" / module / "module_manifest.yaml")
+    return manifest if isinstance(manifest, dict) else {}
+
+
+def _roots_from_manifest(project_path: Path, module: str, manifest: dict | None = None) -> dict[str, Path]:
+    manifest = manifest if manifest is not None else _load_manifest(project_path, module)
     roots: dict[str, Path] = {}
-    src = (manifest or {}).get("source_roots", {}) if isinstance(manifest, dict) else {}
+    src = manifest.get("source_roots", {}) if isinstance(manifest.get("source_roots"), dict) else {}
     for kind in ("spec", "frontend", "backend"):
         rels = src.get(kind) or [f"extracted/{module}/{kind}"]
         rels = [rels] if isinstance(rels, str) else rels
@@ -51,28 +58,80 @@ def _roots_from_manifest(project_path: Path, module: str) -> dict[str, Path]:
     return roots
 
 
+def _screen_binding(manifest: dict, screen_id: str) -> dict:
+    """Explicit, maintained screen→source bindings override the SP/id heuristics
+    for screens that share generic stored procedures (the 진행현황/PRG group),
+    where heuristic resolution over-binds several screens onto one module. Shape::
+
+        screen_bindings:
+          PDT_PRG_003M: {backend: <path>, frontend: <path>}
+
+    Keys are matched on the normalized screen id so `PDT-PRG-003M` / `PDT_PRG_003M`
+    are equivalent. Paths are resolved relative to the matching source root, then
+    the project root, then as an absolute path."""
+    raw = manifest.get("screen_bindings")
+    if not isinstance(raw, dict):
+        return {}
+    want = _norm(screen_id)
+    for key, val in raw.items():
+        if _norm(str(key)) == want and isinstance(val, dict):
+            return val
+    return {}
+
+
+def _resolve_binding_path(value: object, *roots: Path) -> Path | None:
+    if not value:
+        return None
+    for root in roots:
+        cand = (root / str(value))
+        if cand.exists():
+            return cand.resolve()
+    cand = Path(str(value))
+    return cand.resolve() if cand.is_absolute() and cand.exists() else None
+
+
 def run_screen_audit(project_path: str | Path, module: str, screen_id: str) -> dict:
     project_path = Path(project_path).resolve()
     if not (project_path / "qa-context" / "modules" / module).exists():
         raise ErpqaError(f"module {module} is not initialized; run `erpqa module-init` first")
 
-    roots = _roots_from_manifest(project_path, module)
+    manifest = _load_manifest(project_path, module)
+    roots = _roots_from_manifest(project_path, module, manifest)
+    binding = _screen_binding(manifest, screen_id)
     spec_file = resolve_spec_file(roots["spec"], screen_id)
     if spec_file is None:
         raise ErpqaError(f"no spec xlsx found for screen {screen_id} under {roots['spec']}")
 
     spec = extract_spec_screen(spec_file, screen_id)
-    # Resolve backend by the screen-id code first (exact, then transposition-tolerant
-    # so PDT_PRG_003M -> pdt_pgr_003m), then fall back to specificity-weighted SP
-    # matching for screens whose id does not map to a module.
+    # Resolve the backend, recording HOW it was bound so findings can be trusted
+    # accordingly:
+    #   explicit   — maintained screen_bindings entry (deterministic, 1:1)
+    #   id-code    — screen-id matches a module dir (exact, or transposition-tolerant
+    #                so PDT_PRG_003M -> pdt_pgr_003m; digits are in the multiset so
+    #                003 never collides with 004)
+    #   sp-fallback— specificity-weighted stored-proc matching; used only when the id
+    #                does not map to a module. This is the one path that can over-bind
+    #                screens sharing generic SPs (the 진행현황/PRG group), so findings
+    #                derived from it are explicitly marked low-confidence below.
     sp_names = [sp["proc"] for sp in spec.sps]
-    backend_dir = resolve_backend_module(roots["backend"], screen_id) or resolve_backend_by_sps(roots["backend"], sp_names)
+    backend_dir = _resolve_binding_path(binding.get("backend"), roots["backend"], project_path)
+    resolution_method = "explicit"
+    if backend_dir is None:
+        backend_dir = resolve_backend_module(roots["backend"], screen_id)
+        resolution_method = "id-code"
+    if backend_dir is None:
+        backend_dir = resolve_backend_by_sps(roots["backend"], sp_names)
+        resolution_method = "sp-fallback"
     if backend_dir is None:
         raise ErpqaError(f"no backend module found for screen {screen_id} under {roots['backend']}")
+    resolution_uncertain = resolution_method == "sp-fallback"
 
     backend = extract_backend_module(backend_dir)
     alias_ci = {k.lower(): v for k, v in backend.alias_to_clean.items()}
-    fe_files, anchor = resolve_frontend_files(roots["frontend"], backend, screen_id)
+    fe_feature_dir = _resolve_binding_path(binding.get("frontend"), roots["frontend"], project_path)
+    fe_files, anchor, missing_shared = resolve_frontend_files(
+        roots["frontend"], backend, screen_id, fe_feature_dir
+    )
     frontend = extract_frontend_feature(fe_files, anchor)
     fe_keys = {k.lower() for k in frontend.zod_fields}
 
@@ -131,6 +190,44 @@ def run_screen_audit(project_path: str | Path, module: str, screen_id: str) -> d
         else:
             column_only_in_backend.append(clean)
 
+    # 0) spec-coverage gap: the screen looks like a save/입력 screen (its name says
+    # 등록/입력/작업보고, or the backend implements IU, or the frontend has a
+    # create/update mutation) yet the spec carries NO save-SP (_IU) example, so the
+    # save-field dimension could not be evaluated. Emit an honest notice instead of
+    # silently reporting the save dimension as clean.
+    # macOS stores Hangul filenames in NFD (decomposed); normalize to NFC so the
+    # Korean save-screen tokens match regardless of filesystem normalization.
+    spec_name = unicodedata.normalize("NFC", spec.source_file)
+    name_says_save = any(tok in spec_name for tok in ("등록", "입력", "작업보고"))
+    save_expected = (
+        name_says_save
+        or "IU" in backend.implemented_roles
+        or bool(frontend.mutations & {"create", "update"})
+    )
+    if save_expected and not save_params:
+        ev = []
+        if name_says_save:
+            ev.append("화면명")
+        if "IU" in backend.implemented_roles:
+            ev.append("백엔드 _IU 구현")
+        if frontend.mutations & {"create", "update"}:
+            ev.append("프론트 mutation")
+        findings.append({
+            "screen_id": screen_id, "module": module, "mismatch_type": "SaveSpecExampleMissing",
+            "expected_from_source_of_truth": "명세 저장 SP(_IU) 예시 (exec ..._IU @param=)",
+            "actual_spec": "명세에 저장 SP 예시 없음 → 저장 필드 비교를 수행하지 못함",
+            "backend_evidence": f"저장 화면 추정 근거: {', '.join(ev)}",
+            "severity": "MAJOR", "suggested_fix_type": "add-save-sp-example-to-spec",
+            "source_files": [rel_spec, _rel(backend_dir, project_path)],
+            "confidence": "medium", "needs_human_confirmation": True,
+            "frontend_override_forbidden": True,
+            "ai_fix_instruction": (
+                f"화면 {screen_id}: 저장 화면으로 보이나 명세 xlsx에 저장 SP(_IU) 예시가 없어 "
+                "저장 필드 검증을 건너뜀(거짓 CLEAN 방지). 명세에 저장 SP 예시를 보강하거나, "
+                "저장이 없는 조회전용 화면이면 사람이 확인 후 분류할 것."
+            ),
+        })
+
     # 1) capability gap: spec defines a save (IU) but backend has no IU implementation
     if save_params and "IU" not in backend.implemented_roles and not (backend.implemented_roles & {"I", "U"}):
         findings.append({
@@ -172,6 +269,26 @@ def run_screen_audit(project_path: str | Path, module: str, screen_id: str) -> d
             ),
         })
 
+    # Copy-step rule enforcement: a seed file imports shared @/models or @/adapters
+    # that are NOT in the extracted slice (only feature-*/ was copied). This is the
+    # precise, actionable cause behind most FrontendModelUnresolved cases — name the
+    # exact missing imports so the slice can be re-extracted correctly.
+    if missing_shared:
+        sample = ", ".join(sorted(missing_shared)[:8])
+        findings.append({
+            "screen_id": screen_id, "module": module, "mismatch_type": "FrontendSliceIncomplete",
+            "expected_from_source_of_truth": "공유 `src/models/` + `src/adapters/` 포함된 프론트 슬라이스",
+            "actual_frontend": f"슬라이스에 없는 공유 import {len(missing_shared)}건: {sample}",
+            "severity": "MAJOR", "suggested_fix_type": "re-extract-include-shared-models-and-adapters",
+            "source_files": src_files, "confidence": "high", "needs_human_confirmation": True,
+            "frontend_override_forbidden": True,
+            "ai_fix_instruction": (
+                f"화면 {screen_id}: 프론트 슬라이스가 `feature-*/`만 포함하고 공유 "
+                "`src/models/`·`src/adapters/`를 빠뜨림 → 위 import가 해소되지 않아 필드 비교가 불완전함. "
+                "copy-step 규칙대로 공유 모듈을 포함해 재추출 후 다시 실행할 것."
+            ),
+        })
+
     if not fe_model_resolved:
         findings.append({
             "screen_id": screen_id, "module": module, "mismatch_type": "FrontendModelUnresolved",
@@ -187,10 +304,41 @@ def run_screen_audit(project_path: str | Path, module: str, screen_id: str) -> d
             ),
         })
 
+    # Honesty guard: when the backend was bound via the specificity-weighted SP
+    # fallback (no id-code or explicit binding), the screen may have over-bound to
+    # a module it shares a generic procedure with — exactly the unreliable
+    # 진행현황/PRG case. Downgrade every finding's confidence and flag it, and emit
+    # one notice so a reviewer knows to pin an explicit screen_binding before
+    # trusting these findings.
+    if resolution_uncertain:
+        for f in findings:
+            f["confidence"] = "low"
+            f["resolution_uncertain"] = True
+        findings.insert(0, {
+            "screen_id": screen_id, "module": module, "mismatch_type": "ScreenResolutionLowConfidence",
+            "expected_from_source_of_truth": "고유/primary SP 또는 명시적 screen_binding으로 1:1 결합",
+            "actual_backend": f"공통 SP 가중 매칭으로 추정 결합: {_rel(backend_dir, project_path)}",
+            "severity": "MAJOR", "suggested_fix_type": "pin-explicit-screen-binding",
+            "source_files": [rel_spec, _rel(backend_dir, project_path)],
+            "confidence": "low", "needs_human_confirmation": True, "resolution_uncertain": True,
+            "frontend_override_forbidden": True,
+            "ai_fix_instruction": (
+                f"화면 {screen_id}: 백엔드가 화면ID가 아닌 공통 SP 매칭(sp-fallback)으로 결합됨 → "
+                "여러 화면이 같은 모듈로 오결합됐을 수 있음. module_manifest.yaml의 "
+                "`screen_bindings`에 이 화면의 backend/frontend 경로를 명시한 뒤 재실행하여 검증할 것. "
+                "그 전까지 아래 findings는 신뢰 불가."
+            ),
+        })
+
     return {
         "screen_id": screen_id, "module": module,
         "spec_file": rel_spec,
         "frontend_model_resolved": fe_model_resolved,
+        "resolution": {
+            "method": resolution_method,
+            "uncertain": resolution_uncertain,
+            "confidence": "low" if resolution_uncertain else "high",
+        },
         "backend_module": _rel(backend_dir, project_path),
         "frontend_anchor": _frontend_rel(frontend, project_path),
         "dimensions": {
@@ -243,6 +391,11 @@ def _render(r: dict) -> str:
     L.append(f"- module_memory_read: {r['memory_read']['module_memory_read']}")
     L.append("")
     L.append("## Sources Resolved")
+    res = r.get("resolution", {})
+    method = res.get("method", "?")
+    conf = res.get("confidence", "?")
+    warn = " ⚠️ 휴리스틱 결합 — 명시적 screen_binding 권장" if res.get("uncertain") else ""
+    L.append(f"- resolution: `{method}` (신뢰도: {conf}){warn}")
     L.append(f"- spec: `{r['spec_file']}`")
     L.append(f"- backend: `{r['backend_module']}` (구현된 SP roles: {', '.join(r['backend_implemented_roles']) or '없음'})")
     L.append(f"- frontend: `{r['frontend_anchor']}` (mutations: {', '.join(r['frontend_mutations']) or '없음'})")
@@ -267,8 +420,9 @@ def _render(r: dict) -> str:
         L.append(f"### Finding {i}: {f['mismatch_type']}" + (f" — `{f.get('field','')}`" if f.get("field") else ""))
         for key in ("screen_id", "module", "mismatch_type", "field", "spec_param",
                     "expected_from_source_of_truth", "actual_frontend", "actual_backend",
-                    "backend_evidence", "source_files", "confidence", "needs_human_confirmation",
-                    "severity", "suggested_fix_type", "frontend_override_forbidden", "ai_fix_instruction"):
+                    "actual_spec", "backend_evidence", "source_files", "confidence", "resolution_uncertain",
+                    "needs_human_confirmation", "severity", "suggested_fix_type",
+                    "frontend_override_forbidden", "ai_fix_instruction"):
             if key in f:
                 L.append(f"- {key}: {f[key]}")
         L.append("")

@@ -18,6 +18,11 @@ def default_module_manifest(module: str) -> dict[str, object]:
             "backend": [f"extracted/{module}/backend"],
             "procedure": [f"extracted/{module}/procedure"],
         },
+        # Optional, maintained 1:1 overrides for screens that share generic stored
+        # procedures (screen-audit would otherwise over-bind them via SP matching).
+        # Example: PDT_PRG_003M: {backend: extracted/PDT/backend/pdt_pgr_003m,
+        #                         frontend: extracted/PDT/frontend/feature-prg-003}
+        "screen_bindings": {},
         "source": "erpqa module-init scaffold",
         "confidence": "medium",
         "needs_human_confirmation": True,
