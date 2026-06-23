@@ -90,7 +90,19 @@ def _resolve_binding_path(value: object, *roots: Path) -> Path | None:
     return cand.resolve() if cand.is_absolute() and cand.exists() else None
 
 
-def run_screen_audit(project_path: str | Path, module: str, screen_id: str) -> dict:
+def _frontend_all_text(frontend_root: Path) -> str:
+    """All frontend source as one NFC-normalized blob — Korean labels live across
+    feature files, shared models, and header-config, so a label-presence check
+    searches the whole slice, not just one screen's cluster."""
+    parts: list[str] = []
+    for ts in list(frontend_root.rglob("*.ts")) + list(frontend_root.rglob("*.tsx")):
+        parts.append(ts.read_text(encoding="utf-8", errors="replace"))
+    return unicodedata.normalize("NFC", "\n".join(parts))
+
+
+def run_screen_audit(
+    project_path: str | Path, module: str, screen_id: str, with_labels: bool = False
+) -> dict:
     project_path = Path(project_path).resolve()
     if not (project_path / "qa-context" / "modules" / module).exists():
         raise ErpqaError(f"module {module} is not initialized; run `erpqa module-init` first")
@@ -269,6 +281,49 @@ def run_screen_audit(project_path: str | Path, module: str, screen_id: str) -> d
             ),
         })
 
+    # ---- dimension: visible labels (opt-in vision). The screen-layout screenshot
+    # in the spec carries Korean field labels that exist nowhere in cell text. Read
+    # them on-device for free (macOS Vision OCR) and check each against the whole
+    # frontend slice: a label shown in the spec whose Korean string appears nowhere
+    # in the frontend is a candidate dropped field. OCR is noisy, so every such
+    # finding is low-confidence and human-confirmed.
+    labels_dim: dict | None = None
+    if with_labels:
+        from erpqa.screen import vision
+
+        workdir = project_path / "qa-context" / "modules" / module / "screens" / screen_id / "spec_images"
+        labels, lmeta = vision.extract_spec_labels(spec_file, workdir)
+        fe_text = _frontend_all_text(roots["frontend"])
+        label_matched: list[str] = []
+        for label in labels:
+            norm = unicodedata.normalize("NFC", label)
+            if norm in fe_text or norm.replace(" ", "") in fe_text.replace(" ", ""):
+                label_matched.append(label)
+                continue
+            if not lmeta["ocr_available"]:
+                continue
+            findings.append({
+                "screen_id": screen_id, "module": module, "mismatch_type": "LabelMissingInFrontend",
+                "field": label,
+                "expected_from_source_of_truth": f"명세 화면 스크린샷에 보이는 라벨 `{label}`",
+                "actual_frontend": "프론트 슬라이스 어디에서도 해당 한글 문자열을 찾지 못함",
+                "severity": "MINOR", "suggested_fix_type": "add-or-confirm-screen-label",
+                "source_files": [rel_spec, _frontend_rel(frontend, project_path)],
+                "confidence": "low", "needs_human_confirmation": True,
+                "frontend_override_forbidden": True,
+                "ai_fix_instruction": (
+                    f"화면 {screen_id}: 명세 스크린샷의 라벨 `{label}`이 프론트 슬라이스에 없음. "
+                    "OCR 오탐 가능성 있으니 사람이 스크린샷과 대조 후 누락 라벨인지 확인할 것."
+                ),
+            })
+        labels_dim = {
+            "source": len(labels),
+            "matched": len(label_matched),
+            "labels": labels,
+            "matched_labels": label_matched,
+            **lmeta,
+        }
+
     # Copy-step rule enforcement: a seed file imports shared @/models or @/adapters
     # that are NOT in the extracted slice (only feature-*/ was copied). This is the
     # precise, actionable cause behind most FrontendModelUnresolved cases — name the
@@ -347,6 +402,7 @@ def run_screen_audit(project_path: str | Path, module: str, screen_id: str) -> d
             "grid_columns": {"source": len(static_cols), "matched": len(column_matched),
                              "only_in_backend": len(column_only_in_backend), "dynamic_skipped": len(dynamic_cols),
                              "note": "info only — backend is evidence, not a defect signal"},
+            **({"labels": labels_dim} if labels_dim is not None else {}),
         },
         "backend_implemented_roles": sorted(backend.implemented_roles),
         "frontend_mutations": sorted(frontend.mutations),
@@ -374,8 +430,10 @@ def _memory_read(project_path: Path, module: str) -> dict:
     }
 
 
-def write_screen_audit(project_path: str | Path, module: str, screen_id: str) -> tuple[Path, Path]:
-    result = run_screen_audit(project_path, module, screen_id)
+def write_screen_audit(
+    project_path: str | Path, module: str, screen_id: str, with_labels: bool = False
+) -> tuple[Path, Path]:
+    result = run_screen_audit(project_path, module, screen_id, with_labels=with_labels)
     rel = f"screens/{screen_id}"
     contract = write_module_yaml(project_path, module, f"{rel}/screen_audit.yaml", result)
     report = write_module_text(project_path, module, f"{rel}/screen_audit_report.md", _render(result))
@@ -407,7 +465,17 @@ def _render(r: dict) -> str:
     L.append(f"| 저장 필드 | 명세 저장 SP(IU) | {d['save_fields']['source']} | {d['save_fields']['matched']} |")
     L.append(f"| 검색 필터 | 명세 조회 SP(S) 입력 | {d['search_filters']['source']} | {d['search_filters']['matched']} |")
     L.append(f"| 그리드 컬럼 | 백엔드 조회결과(증거) | {d['grid_columns']['source']} | {d['grid_columns']['matched']} |")
+    if "labels" in d:
+        ld = d["labels"]
+        L.append(f"| 화면 라벨(OCR) | 명세 스크린샷 | {ld['source']} | {ld['matched']} |")
     L.append(f"- 총 findings(확인필요 포함): **{len(r['findings'])}**")
+    if "labels" in d:
+        ld = d["labels"]
+        eng = f"{ld['ocr_engine']}" + ("" if ld["ocr_available"] else " (사용불가 — OCR 생략)")
+        L.append(f"- 라벨 OCR 엔진: {eng}; 읽은 이미지 {len(ld['images_read'])}개"
+                 + (f", 건너뜀 {len(ld['images_skipped'])}개(EMF/WMF)" if ld["images_skipped"] else ""))
+        if ld["labels"]:
+            L.append(f"- 인식 라벨: {', '.join(ld['labels'])}")
     if d["save_fields"]["matched_fields"]:
         L.append(f"- 저장 매칭 필드: {', '.join(d['save_fields']['matched_fields'])}")
     if d["search_filters"]["matched_fields"]:

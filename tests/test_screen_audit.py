@@ -280,5 +280,48 @@ class SaveSpecCoverageTests(unittest.TestCase):
             self.assertNotIn("SaveSpecExampleMissing", types)
 
 
+class VisionLabelTests(unittest.TestCase):
+    def test_is_label_keeps_korean_captions_drops_data(self):
+        from erpqa.screen.vision import is_label
+        for good in ("입고년월", "품목코드", "거래처", "공급가액"):
+            self.assertTrue(is_label(good), good)
+        for bad in (
+            "A01-013",            # code
+            "2025년 3월",          # has digits
+            "(주)다인에스티에스",   # company marker
+            "다인입고 (컬링)",      # parenthesised data
+            "5",                  # number
+            "OK",                 # no hangul
+            "가",                 # too short / single hangul
+        ):
+            self.assertFalse(is_label(bad), bad)
+
+    def test_extract_spec_labels_uses_injected_ocr_and_filters(self):
+        # Build a tiny xlsx with an embedded PNG; inject a fake OCR so the test does
+        # not depend on the platform Vision engine.
+        from openpyxl import Workbook
+        from openpyxl.drawing.image import Image as XLImage
+        from erpqa.screen import vision
+
+        with tempfile.TemporaryDirectory() as tmp:
+            png = Path(tmp) / "shot.png"
+            # 1x1 PNG
+            png.write_bytes(bytes.fromhex(
+                "89504e470d0a1a0a0000000d49484452000000010000000108060000001f15c4"
+                "890000000d4944415478da6360000002000154a24f3f0000000049454e44ae426082"
+            ))
+            wb = Workbook(); ws = wb.active
+            ws.add_image(XLImage(str(png)), "A1")
+            xlsx = Path(tmp) / "PDT-X-001M.xlsx"; wb.save(xlsx)
+
+            fake_ocr = lambda p: ["입고년월", "품목코드", "A01-013", "(주)데모", "5"]
+            labels, meta = vision.extract_spec_labels(xlsx, Path(tmp) / "imgs", ocr=fake_ocr)
+            self.assertEqual(labels, ["입고년월", "품목코드"])
+            self.assertEqual(meta["ocr_engine"], "macos-vision")
+            # openpyxl renames embedded media on save; just assert a PNG was read.
+            self.assertTrue(meta["images_read"])
+            self.assertTrue(meta["images_read"][0].endswith(".png"))
+
+
 if __name__ == "__main__":
     unittest.main()

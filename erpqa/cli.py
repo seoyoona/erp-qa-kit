@@ -190,7 +190,9 @@ def cmd_screen_audit(args: argparse.Namespace) -> int:
 
     project = _existing_project(args.project_path)
     load_context(project, args.module)
-    contract, report = write_screen_audit(project, args.module, args.screen)
+    contract, report = write_screen_audit(
+        project, args.module, args.screen, with_labels=getattr(args, "labels", False)
+    )
     print(f"Wrote {contract}")
     print(f"Wrote {report}")
     return 0
@@ -226,6 +228,8 @@ def build_parser() -> argparse.ArgumentParser:
             sub.add_argument("--module", required=True, help="Module name")
         if name == "screen-audit":
             sub.add_argument("--screen", required=True, help="Screen id, e.g. PDT-OSC-001M")
+            sub.add_argument("--labels", action="store_true",
+                             help="Also read screen-layout labels from the spec screenshot via on-device OCR (macOS Vision)")
         sub.set_defaults(func=func)
     return parser
 
