@@ -9,6 +9,7 @@ from erpqa.core.module_paths import write_module_text, write_module_yaml
 from erpqa.core.yaml_io import load_yaml
 from erpqa.screen.extractors import (
     _norm,
+    discover_screen_ids,
     extract_backend_module,
     extract_frontend_feature,
     extract_spec_screen,
@@ -438,6 +439,119 @@ def write_screen_audit(
     contract = write_module_yaml(project_path, module, f"{rel}/screen_audit.yaml", result)
     report = write_module_text(project_path, module, f"{rel}/screen_audit_report.md", _render(result))
     return contract, report
+
+
+def _trustworthy(f: dict) -> bool:
+    """A finding a human should act on first: not OCR/heuristic low-confidence and
+    not from an uncertain (sp-fallback) screen binding."""
+    return f.get("confidence") != "low" and not f.get("resolution_uncertain")
+
+
+def write_module_screen_audit(
+    project_path: str | Path, module: str, with_labels: bool = False
+) -> tuple[Path, Path, dict]:
+    """Sweep every id-coded screen in the module, write each screen's audit, and
+    write a consolidated summary (the human-facing deliverable). Returns
+    (summary_yaml, summary_md, summary_dict)."""
+    project_path = Path(project_path).resolve()
+    roots = _roots_from_manifest(project_path, module)
+    screen_ids = discover_screen_ids(roots["spec"])
+    if not screen_ids:
+        raise ErpqaError(f"no id-coded screen specs found under {roots['spec']}")
+
+    rows: list[dict] = []
+    for sid in screen_ids:
+        try:
+            result = run_screen_audit(project_path, module, sid, with_labels=with_labels)
+            write_screen_audit(project_path, module, sid, with_labels=with_labels)
+        except ErpqaError as exc:
+            rows.append({"screen_id": sid, "error": str(exc)})
+            continue
+        fs = result["findings"]
+        rows.append({
+            "screen_id": sid,
+            "resolution": result["resolution"]["method"],
+            "resolution_confidence": result["resolution"]["confidence"],
+            "findings": len(fs),
+            "trustworthy_findings": sum(1 for f in fs if _trustworthy(f)),
+            "finding_types": sorted({f["mismatch_type"] for f in fs}),
+            "trustworthy_items": [
+                {"type": f["mismatch_type"], "field": f.get("field", ""),
+                 "severity": f.get("severity"), "screen_id": sid}
+                for f in fs if _trustworthy(f)
+            ],
+        })
+
+    audited = [r for r in rows if "error" not in r]
+    type_counts: dict[str, int] = {}
+    for r in audited:
+        for f in r["finding_types"]:
+            type_counts[f] = type_counts.get(f, 0) + 1
+    summary = {
+        "module": module,
+        "with_labels": with_labels,
+        "screens": len(rows),
+        "errored": [r["screen_id"] for r in rows if "error" in r],
+        "clean": sum(1 for r in audited if r["findings"] == 0),
+        "issues": sum(1 for r in audited if r["findings"] > 0),
+        "trustworthy_clean": sum(1 for r in audited if r["trustworthy_findings"] == 0),
+        "trustworthy_issues": sum(1 for r in audited if r["trustworthy_findings"] > 0),
+        "resolution_breakdown": _count_by(audited, "resolution"),
+        "screens_with_trustworthy_findings": sum(1 for r in audited if r["trustworthy_findings"] > 0),
+        "finding_type_screen_counts": dict(sorted(type_counts.items())),
+        "rows": rows,
+    }
+    sy = write_module_yaml(project_path, module, "screens/_summary.yaml", summary)
+    sm = write_module_text(project_path, module, "screens/_summary.md", _render_summary(summary))
+    return sy, sm, summary
+
+
+def _count_by(rows: list[dict], key: str) -> dict[str, int]:
+    out: dict[str, int] = {}
+    for r in rows:
+        out[r[key]] = out.get(r[key], 0) + 1
+    return dict(sorted(out.items()))
+
+
+def _render_summary(s: dict) -> str:
+    L = [f"# Screen Audit Summary — module {s['module']}", ""]
+    L.append("Frontend는 검사 대상. 화면설계서(SP 파라미터)+백엔드 증거가 source of truth. "
+             "`trustworthy`=신뢰 가능(휴리스틱/ OCR low-confidence 제외).")
+    L.append("")
+    L.append("## 총괄")
+    L.append(f"- 화면 수: **{s['screens']}**")
+    L.append(f"- **신뢰가능 기준: CLEAN {s['trustworthy_clean']} · ISSUES {s['trustworthy_issues']}** "
+             "(사람이 먼저 볼 숫자 — 휴리스틱/OCR low-confidence 제외)")
+    L.append(f"- 전체(저신뢰 포함): CLEAN {s['clean']} · ISSUES {s['issues']}"
+             + (" — `--labels`가 켜져 OCR 라벨 후보가 모든 화면에 붙어 raw CLEAN이 낮음" if s["with_labels"] else ""))
+    L.append(f"- 라벨 OCR 차원: {'켜짐(--labels)' if s['with_labels'] else '꺼짐'}")
+    L.append(f"- resolution: {', '.join(f'{k} {v}' for k, v in s['resolution_breakdown'].items())}")
+    if s["errored"]:
+        L.append(f"- ⚠️ 오류 화면: {', '.join(s['errored'])}")
+    L.append("")
+    L.append("## finding 유형별 화면 수")
+    for t, c in s["finding_type_screen_counts"].items():
+        L.append(f"- {t}: {c}")
+    L.append("")
+    L.append("## 화면별 현황")
+    L.append("| 화면 | resolution | 신뢰도 | findings | 신뢰가능 | 유형 |")
+    L.append("|---|---|---|---|---|---|")
+    for r in s["rows"]:
+        if "error" in r:
+            L.append(f"| {r['screen_id']} | ERROR | — | — | — | {r['error']} |")
+            continue
+        flag = "" if r["resolution"] != "sp-fallback" else " ⚠️"
+        L.append(f"| {r['screen_id']} | {r['resolution']}{flag} | {r['resolution_confidence']} "
+                 f"| {r['findings']} | {r['trustworthy_findings']} | {', '.join(r['finding_types']) or '-'} |")
+    L.append("")
+    L.append("## 사람 우선 검토 — 신뢰 가능한 findings")
+    items = [it for r in s["rows"] if "error" not in r for it in r["trustworthy_items"]]
+    if not items:
+        L.append("- (없음)")
+    for it in items:
+        fld = f" `{it['field']}`" if it["field"] else ""
+        L.append(f"- [{it['severity']}] {it['screen_id']} — {it['type']}{fld}")
+    return "\n".join(L) + "\n"
 
 
 def _render(r: dict) -> str:

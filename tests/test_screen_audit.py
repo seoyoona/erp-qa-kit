@@ -280,6 +280,20 @@ class SaveSpecCoverageTests(unittest.TestCase):
             self.assertNotIn("SaveSpecExampleMissing", types)
 
 
+class DiscoverScreenIdsTests(unittest.TestCase):
+    def test_discovers_id_coded_specs_and_skips_others(self):
+        from erpqa.screen.extractors import discover_screen_ids
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            for n in ("PDT-OSC-001M_원부자재입고등록.xlsx", "PDT_PRG_003M_반제품진행.xlsx",
+                      "PDT_MG_001M_생산계획현황.xlsx", "PDT_기준정보_공정등록.xlsx",
+                      "PDT_생산데이터_금형관리.xlsx", "PDT_PRG_003M_반제품_미사용.xlsx"):
+                (root / n).write_bytes(b"")
+            ids = discover_screen_ids(root)
+            # underscore/dash both normalize to dash form; dup PRG-003M collapses
+            self.assertEqual(ids, ["PDT-MG-001M", "PDT-OSC-001M", "PDT-PRG-003M"])
+
+
 class VisionLabelTests(unittest.TestCase):
     def test_is_label_keeps_korean_captions_drops_data(self):
         from erpqa.screen.vision import is_label

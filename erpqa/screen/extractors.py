@@ -218,6 +218,22 @@ def _norm(s: str) -> str:
     return re.sub(r"[^a-z0-9]", "", s.lower())
 
 
+# Id-coded screen filenames: PDT-OSC-001M_*, PDT_PRG_003M_*, PDT_MG_001M_* …
+# (the 기준정보/생산데이터 specs are not id-coded and are intentionally skipped).
+_SCREEN_ID_FILE_RE = re.compile(r"^([A-Za-z][A-Za-z0-9]*[-_][A-Za-z0-9]+[-_]\d+M)(?=$|[-_])")
+
+
+def discover_screen_ids(spec_root: Path) -> list[str]:
+    """All id-coded screen ids found among the module's spec xlsx filenames,
+    de-duplicated (a screen can have 미사용/통합 spec variants) and sorted."""
+    ids: dict[str, None] = {}
+    for f in sorted(spec_root.rglob("*.xlsx")):
+        m = _SCREEN_ID_FILE_RE.match(f.stem)
+        if m:
+            ids.setdefault(m.group(1).upper().replace("_", "-"), None)
+    return sorted(ids)
+
+
 def resolve_spec_file(spec_root: Path, screen_id: str) -> Path | None:
     key = _norm(screen_id)
     for f in sorted(spec_root.rglob("*.xlsx")):

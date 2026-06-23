@@ -198,6 +198,20 @@ def cmd_screen_audit(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_screen_audit_all(args: argparse.Namespace) -> int:
+    from erpqa.screen.audit import write_module_screen_audit
+
+    project = _existing_project(args.project_path)
+    load_context(project, args.module)
+    sy, sm, summary = write_module_screen_audit(
+        project, args.module, with_labels=getattr(args, "labels", False)
+    )
+    print(f"Audited {summary['screens']} screens: CLEAN {summary['clean']} · ISSUES {summary['issues']}")
+    print(f"Wrote {sy}")
+    print(f"Wrote {sm}")
+    return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="erpqa", description="ERP QA Kit local CLI")
     subparsers = parser.add_subparsers(dest="command", required=True)
@@ -220,6 +234,7 @@ def build_parser() -> argparse.ArgumentParser:
         "module-handoff": ("Generate module frontend fix handoff", cmd_module_handoff, True),
         "module-audit": ("Run module audit end-to-end", cmd_module_audit, True),
         "screen-audit": ("Audit one screen (spec SP fields vs frontend, v0.3)", cmd_screen_audit, True),
+        "screen-audit-all": ("Audit every id-coded screen in a module + consolidated summary", cmd_screen_audit_all, True),
     }
     for name, (help_text, func, needs_module) in commands.items():
         sub = subparsers.add_parser(name, help=help_text, description=help_text)
@@ -228,6 +243,7 @@ def build_parser() -> argparse.ArgumentParser:
             sub.add_argument("--module", required=True, help="Module name")
         if name == "screen-audit":
             sub.add_argument("--screen", required=True, help="Screen id, e.g. PDT-OSC-001M")
+        if name in ("screen-audit", "screen-audit-all"):
             sub.add_argument("--labels", action="store_true",
                              help="Also read screen-layout labels from the spec screenshot via on-device OCR (macOS Vision)")
         sub.set_defaults(func=func)
