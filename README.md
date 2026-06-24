@@ -135,6 +135,24 @@ Each subcommand takes one required positional `<project_path>`:
   handoff documents.
 - `erpqa module-audit <project_path> --module <MODULE>` orchestrates the v0.2
   module workflow end to end.
+- `erpqa screen-audit <project_path> --module <MODULE> --screen <SCREEN_ID> [--labels]`
+  audits one screen (v0.3): resolves spec/backend/frontend, compares save fields,
+  search filters, and grid columns, and records how the backend was bound
+  (`resolution.method`).
+- `erpqa screen-audit-all <project_path> --module <MODULE> [--labels]` audits
+  every id-coded screen in the module and writes the consolidated
+  `screens/_summary.{md,yaml}`. The summary leads with the **trustworthy**
+  CLEAN/ISSUES count (heuristic and OCR low-confidence findings excluded).
+
+> **`--labels` (vision) and Codex / CI runs.** The optional `--labels` flag reads
+> the spec screenshot's Korean labels via on-device **macOS Vision OCR** (free,
+> no API). It only produces labels on **macOS with the Swift toolchain
+> (`swiftc`)**. On any other host — including a Codex remote/Linux sandbox or CI —
+> OCR degrades gracefully: the audit still runs, the labels dimension reports
+> `ocr_available: false`, and nothing crashes. The deterministic core
+> (`screen-audit` / `screen-audit-all` **without** `--labels`) is pure Python and
+> runs anywhere with Python 3.9+. For reproducible Codex/CI automation, omit
+> `--labels`; run it only on macOS when you want the label dimension.
 
 Exit code `0` means the command completed. Non-zero exits indicate usage or
 validation failures; `generate-sql` reports unsafe rules and continues by
