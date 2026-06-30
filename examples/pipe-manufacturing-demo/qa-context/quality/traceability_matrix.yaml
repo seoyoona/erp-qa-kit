@@ -1,0 +1,76 @@
+links:
+  - trace_id: TR-INV-001
+    requirement_id: REQ-INV-001
+    process_id: PROC-INV-001
+    screen_id: INV-RCV-001M
+    frontend:
+      component: frontend/app.js
+      view_config: screen_specs/inventory_receipt.md
+      field_name: receipt_qty
+    backend:
+      dto: backend/app.py
+      service: backend/app.py
+    api: POST /api/inventory/receipts
+    sp:
+      - usp_inventory_receipt
+    db_assertion: generated/sql/inv_receipt_creates_movement.sql
+    artifact_refs:
+      - frontend/app.js
+      - backend/app.py
+      - screen_specs/inventory_receipt.md
+      - qa-context/generated/sql/inv_receipt_creates_movement.sql
+    test_case_id: TC-INV-001
+    defect_id: DEF-DEMO-001
+    signoff_item: SO-INV-001
+    finding_ids:
+      - F-DEMO-001
+  - trace_id: TR-PRD-001
+    requirement_id: REQ-PRD-001
+    process_id: PROC-PRD-001
+    screen_id: PRD-RSL-001M
+    frontend:
+      component: frontend/app.js
+      view_config: screen_specs/production_result.md
+      field_name: good_qty
+    backend:
+      dto: backend/app.py
+      service: backend/app.py
+    api: POST /api/production/results
+    sp:
+      - usp_production_result
+    db_assertion: generated/sql/prod_completion_creates_movement.sql
+    artifact_refs:
+      - frontend/app.js
+      - backend/app.py
+      - screen_specs/production_result.md
+      - qa-context/generated/sql/prod_completion_creates_movement.sql
+    test_case_id: TC-PRD-001
+    defect_id: DEF-DEMO-001
+    signoff_item: SO-PRD-001
+    finding_ids:
+      - F-DEMO-002
+  - trace_id: TR-SHP-001
+    requirement_id: REQ-SHP-001
+    process_id: PROC-SHP-001
+    screen_id: SHP-CFM-001M
+    frontend:
+      component: frontend/app.js
+      view_config: screen_specs/shipment.md
+      field_name: shipment_qty
+    backend:
+      dto: backend/app.py
+      service: backend/app.py
+    api: POST /api/shipments
+    sp:
+      - usp_shipment_confirm
+    db_assertion: generated/sql/inv_shipment_decreases_stock.sql
+    artifact_refs:
+      - frontend/app.js
+      - backend/app.py
+      - screen_specs/shipment.md
+      - qa-context/generated/sql/inv_shipment_decreases_stock.sql
+    test_case_id: TC-SHP-001
+    defect_id: DEF-DEMO-001
+    signoff_item: SO-SHP-001
+    finding_ids:
+      - F-DEMO-003

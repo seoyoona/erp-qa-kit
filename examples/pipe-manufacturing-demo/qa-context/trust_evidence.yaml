@@ -1,0 +1,45 @@
+isolation:
+  pre_snapshot: true
+  post_snapshot: true
+  file_diff_pass: true
+  git_status_unchanged: true
+  approval_ledger: true
+  no_live_write_methods: true
+  no_db_writes: true
+  artifact_inventory: true
+triage:
+  screen_binding_coverage: 1.0
+  spec_parser_quality: 0.95
+  frontend_slice_complete: true
+  backend_binding_high_confidence: true
+  confidence_calibrated: true
+  human_review_queue: true
+  traceability_coverage: 1.0
+  impact_analysis_present: true
+  process_catalog_present: true
+  unmapped_high_confidence_findings: 0
+final_qa:
+  static_triage_passed: true
+  browser_smoke_passed: true
+  readonly_api_passed: true
+  db_readonly_assertions_passed: true
+  write_uat_passed: true
+  cleanup_residual_zero: true
+  human_signoff_complete: true
+  process_coverage: 1.0
+  impacted_test_coverage: 1.0
+  test_run_ledger_complete: true
+  defect_gate_passed: true
+  environment_fingerprint_present: true
+  test_data_contract_passed: true
+  flake_policy_applied: true
+findings:
+  - finding_id: F-DEMO-001
+    severity: high
+    confidence: high
+  - finding_id: F-DEMO-002
+    severity: medium
+    confidence: high
+  - finding_id: F-DEMO-003
+    severity: medium
+    confidence: high

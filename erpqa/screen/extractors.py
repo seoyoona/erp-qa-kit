@@ -52,6 +52,8 @@ class FrontendFeature:
 _EXEC_RE = re.compile(r"exec\s+([\w.]+)\s*(.*)", re.IGNORECASE)
 _PARAM_RE = re.compile(r"@(\w+)\s*=")
 _SCREEN_ID_RE = re.compile(r"\bPDT[-_][A-Z0-9]+[-_]?\d+M\b", re.IGNORECASE)
+_GENERIC_SCREEN_ID_RE = re.compile(r"\b[A-Z]{2,4}[-_][A-Z0-9]{2,5}[-_]\d+M\b", re.IGNORECASE)
+_CELL_RE = re.compile(r"([A-Z]+)(\d+)=([^|]+)")
 
 
 _ROLE_SUFFIX_RE = re.compile(r"^(IU|S|I|U|D)\d*$")  # S, S2, S4, IU, IU2 ...
@@ -66,6 +68,93 @@ def _role_from_proc(proc: str) -> str:
     # their params (filters / save fields) are silently lost as OTHER.
     m = _ROLE_SUFFIX_RE.match(suffix)
     return m.group(1) if m else "OTHER"
+
+
+def _cell_col_index(col: str) -> int:
+    n = 0
+    for ch in col:
+        n = n * 26 + (ord(ch.upper()) - ord("A") + 1)
+    return n
+
+
+def _read_cell_text(path: Path) -> dict[tuple[str, int], str]:
+    cells: dict[tuple[str, int], str] = {}
+    for line in path.read_text(encoding="utf-8", errors="replace").splitlines():
+        for col, row, value in _CELL_RE.findall(line):
+            cells[(col, int(row))] = value.strip()
+    return cells
+
+
+def _row_values(cells: dict[tuple[str, int], str], row: int) -> list[tuple[int, str]]:
+    values: list[tuple[int, str]] = []
+    for (col, r), value in cells.items():
+        if r == row and value:
+            values.append((_cell_col_index(col), value))
+    return sorted(values)
+
+
+def _next_row_value(row: dict[int, str], label: str) -> str:
+    for idx, value in row.items():
+        if value.strip().lower() == label.lower():
+            return row.get(idx + 1, "")
+    return ""
+
+
+def extract_screen_io_text(path: str | Path) -> dict:
+    path = Path(path)
+    cells = _read_cell_text(path)
+    row1 = dict(_row_values(cells, 1))
+    screen_id = _next_row_value(row1, "Screen ID") or _next_row_value(row1, "화면 ID")
+    if not screen_id:
+        m = _GENERIC_SCREEN_ID_RE.search(path.stem)
+        screen_id = m.group(0).upper() if m else ""
+    screen_name = row1.get(_cell_col_index("I"), "")
+    actions = [
+        value
+        for _, value in _row_values(cells, 8)
+        if value in {
+            "Search",
+            "New",
+            "Save",
+            "Submit",
+            "Approve",
+            "Delete",
+            "Add",
+            "Excel",
+            "Print",
+            "조회",
+            "신규",
+            "저장",
+            "제출",
+            "승인",
+            "삭제",
+            "추가",
+            "엑셀",
+            "출력",
+        }
+    ]
+    filters = [
+        value
+        for _, value in _row_values(cells, 12)
+        if value not in {"~", "□", "● 전체     ○ SP     ○ GP     ○ FP"}
+    ]
+    grid_columns = [
+        value
+        for _, value in _row_values(cells, 16)
+        if value not in {"No", "Select", "순번", "선택"}
+    ]
+    return {
+        "screen_id": screen_id,
+        "screen_name": screen_name,
+        "buttons_actions": actions,
+        "search_filters": filters,
+        "grid_columns": grid_columns,
+        "form_fields": [],
+        "hidden_fields": [],
+        "source_file": path.name,
+        "confidence": "high" if screen_id and (filters or grid_columns) else "medium",
+        "needs_human_confirmation": False if screen_id and grid_columns else True,
+    }
 
 
 def extract_spec_screen(xlsx_path: Path, screen_id: str | None = None) -> SpecScreen:

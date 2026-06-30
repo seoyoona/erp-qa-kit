@@ -37,6 +37,24 @@ You can also run the CLI without installing the console script:
 python -m erpqa --help
 ```
 
+## External Quickstart
+
+Build or receive a release wheel, then verify the installed CLI from a clean
+environment:
+
+```bash
+python -m venv .venv
+source .venv/bin/activate
+pip install dist/erp_qa_kit-0.3.0-py3-none-any.whl
+erpqa --help
+erpqa init ./my-erp-project
+erpqa quality-init ./my-erp-project
+erpqa quality-validate ./my-erp-project
+```
+
+Live browser, API, SQL, and write-UAT evidence steps are approval-gated and
+disabled by default.
+
 ## Demo Quickstart
 
 The bundled demo is `examples/pipe-manufacturing-demo/`. Run the six-command
@@ -101,6 +119,17 @@ Each module command reads `project_policy.yaml`, `project_memory.md`,
 `module_policy.yaml`, and `module_memory.md` before doing stage work. Draft
 project policies halt module commands until a human confirms the policy.
 
+## Generic Trust-Gated ERP QA
+
+ERP QA Kit separates release evidence into three gates:
+
+1. Isolation / safety evidence with file, hash, approval, and write-containment proof.
+2. First-pass deterministic triage with screen binding, traceability, and change-impact analysis.
+3. Final ERP QA readiness with process coverage, execution ledger, defect lifecycle, environment fingerprint, cleanup proof, flake policy, and human signoff.
+
+Default `erpqa` commands remain offline and do not execute SQL or network calls.
+Live checks are separate approval-gated evidence steps.
+
 ## CLI Commands
 
 Each subcommand takes one required positional `<project_path>`:
@@ -143,6 +172,24 @@ Each subcommand takes one required positional `<project_path>`:
   every id-coded screen in the module and writes the consolidated
   `screens/_summary.{md,yaml}`. The summary leads with the **trustworthy**
   CLEAN/ISSUES count (heuristic and OCR low-confidence findings excluded).
+- `erpqa isolation-snapshot <project_path> --label <LABEL> [--repo <PATH>]`
+  writes file/hash/git safety evidence under `qa-context/safety/`.
+- `erpqa isolation-verify <project_path> --before <LABEL> --after <LABEL>`
+  compares two isolation snapshots and fails on unexpected writes outside
+  `qa-context/` and `extracted/`.
+- `erpqa quality-init <project_path>` scaffolds generic ERP quality evidence
+  artifacts under `qa-context/quality/` and `qa-context/quality_policy.yaml`.
+- `erpqa quality-validate <project_path>` validates process, traceability,
+  impact, test catalog, execution ledger, test data, defects, environment, and
+  flake evidence. Missing artifacts produce actionable remediation output.
+- `erpqa quality-impact <project_path> --changed-file <PATH>` updates
+  `quality/impact_analysis.yaml` from changed files, traceability links, and
+  configured impact rules.
+- `erpqa trust-score <project_path>` scores isolation, triage, and final QA
+  evidence from `qa-context/trust_evidence.yaml`.
+- `erpqa final-qa-signoff <project_path> --module <MODULE>` renders
+  `signoff/final_qa_signoff.md` and exits non-zero unless the release evidence
+  packet satisfies the final QA gate.
 
 > **`--labels` (vision) and Codex / CI runs.** The optional `--labels` flag reads
 > the spec screenshot's Korean labels via on-device **macOS Vision OCR** (free,
@@ -173,12 +220,15 @@ qa-context/
   generated/
     sql/
   reports/
+  safety/
+  quality/
   feedback/
     feedback_items.yaml
     PM_FEEDBACK_TEMPLATE.md
   handoff/
     fix_handoff.md
     codex_fix_prompt.md
+  signoff/
   modules/
     ORD/
       module_manifest.yaml

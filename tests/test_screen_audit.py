@@ -314,27 +314,44 @@ class VisionLabelTests(unittest.TestCase):
         # Build a tiny xlsx with an embedded PNG; inject a fake OCR so the test does
         # not depend on the platform Vision engine.
         from openpyxl import Workbook
+        try:
+            from PIL import Image as PILImage
+        except Exception:
+            self.skipTest("Pillow unavailable for fixture image creation")
         from openpyxl.drawing.image import Image as XLImage
         from erpqa.screen import vision
 
         with tempfile.TemporaryDirectory() as tmp:
             png = Path(tmp) / "shot.png"
-            # 1x1 PNG
-            png.write_bytes(bytes.fromhex(
-                "89504e470d0a1a0a0000000d49484452000000010000000108060000001f15c4"
-                "890000000d4944415478da6360000002000154a24f3f0000000049454e44ae426082"
-            ))
-            wb = Workbook(); ws = wb.active
+            PILImage.new("RGB", (1, 1), color="white").save(png)
+            wb = Workbook()
+            ws = wb.active
             ws.add_image(XLImage(str(png)), "A1")
-            xlsx = Path(tmp) / "PDT-X-001M.xlsx"; wb.save(xlsx)
+            xlsx = Path(tmp) / "PDT-X-001M.xlsx"
+            wb.save(xlsx)
 
-            fake_ocr = lambda p: ["입고년월", "품목코드", "A01-013", "(주)데모", "5"]
+            def fake_ocr(path: Path) -> list[str]:
+                return ["입고년월", "품목코드", "A01-013", "(주)데모", "5"]
+
             labels, meta = vision.extract_spec_labels(xlsx, Path(tmp) / "imgs", ocr=fake_ocr)
             self.assertEqual(labels, ["입고년월", "품목코드"])
             self.assertEqual(meta["ocr_engine"], "macos-vision")
             # openpyxl renames embedded media on save; just assert a PNG was read.
             self.assertTrue(meta["images_read"])
             self.assertTrue(meta["images_read"][0].endswith(".png"))
+
+
+class ScreenAuditSummaryQualityTests(unittest.TestCase):
+    def test_summary_reports_triage_quality_inputs(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            fx = _Fixture(tmp, bind=True)
+            _, _, summary = __import__(
+                "erpqa.screen.audit", fromlist=["write_module_screen_audit"]
+            ).write_module_screen_audit(fx.project, fx.module)
+            self.assertIn("triage_quality", summary)
+            self.assertIn("screen_binding_coverage", summary["triage_quality"])
+            self.assertIn("spec_parser_quality", summary["triage_quality"])
+            self.assertIn("frontend_slice_complete", summary["triage_quality"])
 
 
 if __name__ == "__main__":

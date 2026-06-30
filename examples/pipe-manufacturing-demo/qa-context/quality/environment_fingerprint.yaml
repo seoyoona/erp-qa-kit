@@ -1,0 +1,7 @@
+build_id: pipe-demo-20260630
+frontend_commit: local-demo-frontend
+backend_commit: local-demo-backend
+base_url: https://erpqa-demo.invalid
+db_alias: PIPE-DEMO
+browser_device: chromium-desktop
+account_role: qa-demo

@@ -4,10 +4,22 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "erp-qa-kit"
-version = "0.2.0"
-description = "Local file-based ERP data-integrity QA toolkit"
+version = "0.3.0"
+description = "Customer-neutral ERP QA evidence, traceability, and release signoff toolkit"
 readme = "README.md"
 requires-python = ">=3.11"
+license = "LicenseRef-Proprietary"
+authors = [{ name = "ERP QA Kit Maintainers" }]
+keywords = ["erp", "qa", "traceability", "release-signoff", "test-evidence"]
+classifiers = [
+  "Development Status :: 4 - Beta",
+  "Environment :: Console",
+  "Intended Audience :: Developers",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+  "Topic :: Software Development :: Quality Assurance",
+]
 dependencies = [
   "PyYAML>=6,<7",
   "openpyxl>=3.1,<4",
@@ -16,6 +28,12 @@ dependencies = [
 [project.optional-dependencies]
 pandas = ["pandas"]
 markitdown = ["markitdown"]
+dev = ["coverage[toml]>=7,<8", "ruff>=0.5,<1", "pip-audit>=2,<3"]
+
+[project.urls]
+Homepage = "https://github.com/litmers-dev/erp-qa-kit"
+Documentation = "https://github.com/litmers-dev/erp-qa-kit/tree/main/docs"
+Source = "https://github.com/litmers-dev/erp-qa-kit"
 
 [project.scripts]
 erpqa = "erpqa.cli:main"
@@ -25,3 +43,18 @@ include = ["erpqa*"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+
+[tool.coverage.run]
+# Gate the release-critical evidence engine. Legacy extractors and screen-audit
+# adapters remain covered by their own regression tests and packaging smoke.
+source = ["erpqa.quality", "erpqa.triage", "erpqa.safety"]
+branch = true
+
+[tool.coverage.report]
+fail_under = 95
+show_missing = true
+skip_covered = false
+exclude_lines = [
+  "if __name__ == .__main__.:",
+  "raise SystemExit",
+]

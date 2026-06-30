@@ -21,6 +21,7 @@ from erpqa.core.context import RunContext
 from erpqa.core.errors import ErpqaError
 from erpqa.core.module_paths import module_contract_path, write_module_yaml
 from erpqa.core.yaml_io import load_yaml
+from erpqa.screen.extractors import extract_screen_io_text
 
 
 def _rel(ctx: RunContext, path: Any) -> str:
@@ -87,6 +88,38 @@ def generate_screen_contract(ctx: RunContext) -> Path:
     top_needs = True
 
     for file in files:
+        if file.suffix.lower() == ".txt":
+            parsed = extract_screen_io_text(file)
+            if parsed.get("screen_id"):
+                extraction_methods.append("screen_io_text")
+                contract["screen_id"] = parsed["screen_id"]
+                contract["screen_name"] = parsed.get("screen_name") or contract["screen_name"]
+                source = f"screen_io_text:{_rel(ctx, file)}"
+                for section, values in {
+                    "search_filters": parsed.get("search_filters", []),
+                    "grid_columns": parsed.get("grid_columns", []),
+                    "form_fields": parsed.get("form_fields", []),
+                    "buttons_actions": parsed.get("buttons_actions", []),
+                    "hidden_fields": parsed.get("hidden_fields", []),
+                }.items():
+                    for order, label in enumerate(values, start=1):
+                        sections[section].append(
+                            stamp_item(
+                                {
+                                    "key": _slug(label),
+                                    "label": label,
+                                    "visible": section != "hidden_fields",
+                                    "required": False,
+                                    "order": order,
+                                },
+                                source=source,
+                                confidence=parsed.get("confidence", "high"),
+                                needs_human_confirmation=bool(parsed.get("needs_human_confirmation", False)),
+                            )
+                        )
+                top_confidence = parsed.get("confidence", "high")
+                top_needs = bool(parsed.get("needs_human_confirmation", False))
+                continue
         adapters = select_all(file, ctx.policy.allowed_file_formats)
         if not adapters:
             continue

@@ -43,7 +43,22 @@ class EndToEndTests(unittest.TestCase):
             (qa / "generated" / "sql" / "generation_status.yaml").read_text(),
         )
 
+    def test_pipe_manufacturing_demo_quality_packet_validates(self):
+        project = copy_demo(self.tmp_path)
+
+        exit_code = main(["quality-validate", str(project)])
+
+        self.assertEqual(exit_code, 0)
+
+    def test_pipe_manufacturing_demo_final_signoff_scores_9_8_plus(self):
+        project = copy_demo(self.tmp_path)
+
+        exit_code = main(["final-qa-signoff", str(project), "--module", "DEMO"])
+
+        self.assertEqual(exit_code, 0)
+        signoff = project / "qa-context" / "signoff" / "final_qa_signoff.md"
+        self.assertTrue(signoff.exists())
+
 
 if __name__ == "__main__":
     unittest.main()
-

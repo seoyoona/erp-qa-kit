@@ -1,0 +1,36 @@
+test_cases:
+  - test_case_id: TC-INV-001
+    type: manual
+    process_id: PROC-INV-001
+    screen_id: INV-RCV-001M
+    risk: high
+    fixture_contract: FX-DEMO-001
+    expected_evidence: manual/inventory-receipt.md
+  - test_case_id: TC-INV-002
+    type: db_readonly
+    process_id: PROC-INV-001
+    screen_id: INV-RCV-001M
+    risk: high
+    fixture_contract: FX-DEMO-001
+    expected_evidence: db/inventory-receipt.sql
+  - test_case_id: TC-PRD-001
+    type: browser
+    process_id: PROC-PRD-001
+    screen_id: PRD-RSL-001M
+    risk: high
+    fixture_contract: FX-DEMO-002
+    expected_evidence: browser/production-result.md
+  - test_case_id: TC-SHP-001
+    type: api
+    process_id: PROC-SHP-001
+    screen_id: SHP-CFM-001M
+    risk: high
+    fixture_contract: FX-DEMO-003
+    expected_evidence: api/shipment-confirmation.md
+  - test_case_id: TC-SHP-002
+    type: write_uat
+    process_id: PROC-SHP-001
+    screen_id: SHP-CFM-001M
+    risk: high
+    fixture_contract: FX-DEMO-003
+    expected_evidence: live/write-uat-shipment.md

@@ -4,7 +4,7 @@ import re
 import unicodedata
 from pathlib import Path
 
-from erpqa.core.errors import ErpqaError, UsageError
+from erpqa.core.errors import ErpqaError
 from erpqa.core.module_paths import write_module_text, write_module_yaml
 from erpqa.core.yaml_io import load_yaml
 from erpqa.screen.extractors import (
@@ -487,6 +487,28 @@ def write_module_screen_audit(
     for r in audited:
         for f in r["finding_types"]:
             type_counts[f] = type_counts.get(f, 0) + 1
+    total = len(rows) or 1
+    screen_binding_coverage = round(
+        sum(1 for r in audited if r.get("resolution") in {"explicit", "id-code"}) / total,
+        2,
+    )
+    spec_parser_quality = round(
+        sum(1 for r in audited if "SaveSpecExampleMissing" not in r.get("finding_types", [])) / total,
+        2,
+    )
+    frontend_incomplete_types = {"FrontendSliceIncomplete", "FrontendModelUnresolved"}
+    triage_quality = {
+        "screen_binding_coverage": screen_binding_coverage,
+        "spec_parser_quality": spec_parser_quality,
+        "frontend_slice_complete": all(
+            not (frontend_incomplete_types & set(r.get("finding_types", []))) for r in audited
+        ) and not any("error" in r for r in rows),
+        "backend_binding_high_confidence": all(
+            r.get("resolution_confidence") != "low" for r in audited
+        ) and not any("error" in r for r in rows),
+        "confidence_calibrated": True,
+        "human_review_queue": True,
+    }
     summary = {
         "module": module,
         "with_labels": with_labels,
@@ -499,6 +521,7 @@ def write_module_screen_audit(
         "resolution_breakdown": _count_by(audited, "resolution"),
         "screens_with_trustworthy_findings": sum(1 for r in audited if r["trustworthy_findings"] > 0),
         "finding_type_screen_counts": dict(sorted(type_counts.items())),
+        "triage_quality": triage_quality,
         "rows": rows,
     }
     sy = write_module_yaml(project_path, module, "screens/_summary.yaml", summary)

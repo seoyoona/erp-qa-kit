@@ -1,0 +1,10 @@
+### SHEET: screen-io  (dims=A1:Z56, images=0)
+B1=Project | C1=Demo ERP | F1=Module | G1=PUR | I1=Purchase Order Entry | S1=Screen ID | T1=PUR-ORD-001M
+B6=2. Screen Layout
+C8=Search | E8=New | G8=Save | I8=Submit | K8=Approve
+B12=Supplier Code | C12=Order Date From | F12=Order Date To | J12=Status
+B16=No | C16=Select | D16=Item Code | E16=Item Name | F16=Order Qty | G16=Unit Price | H16=Due Date | I16=Warehouse Code
+B17=No | C17=CHK
+B28=Constraint | C28=- Submitted orders require approval before release
+B38=3. Table Info
+B40=Key | C40=Column | D40=Remark | E40=Order | F40=Data Type

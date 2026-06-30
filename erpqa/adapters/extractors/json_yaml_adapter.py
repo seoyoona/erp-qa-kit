@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-from typing import Any
 
 import yaml
 
@@ -35,4 +34,3 @@ def extract(path: Path) -> RawExtraction:
         notes=[],
         adapter=name,
     )
-

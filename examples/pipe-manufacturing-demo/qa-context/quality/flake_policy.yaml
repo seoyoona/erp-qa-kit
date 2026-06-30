@@ -1,0 +1,10 @@
+retry_limit: 2
+flaky_when: passes_after_retry
+quarantine:
+  requires:
+    - owner
+    - reason
+    - expires_at
+score_penalty:
+  flaky_impacted_test: 0.25
+  quarantined_impacted_test: fail_final_qa

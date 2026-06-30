@@ -1,0 +1,13 @@
+isolation:
+  gate: isolation
+  score: 10.0
+  pass: true
+triage:
+  gate: triage
+  score: 10.0
+  pass: true
+final_qa:
+  gate: final_qa
+  score: 10.0
+  pass: true
+  fail_reasons: []

@@ -21,6 +21,10 @@ htmlcov/
 .idea/
 .vscode/
 
+# Local agent memory and planning notes
+.graphiti
+docs/superpowers/
+
 # Generated QA context (created by the toolkit at runtime)
 qa-context/
 
@@ -37,3 +41,14 @@ examples/pipe-manufacturing-demo/qa-context/rules/*
 examples/pipe-manufacturing-demo/qa-context/feedback/*
 !examples/pipe-manufacturing-demo/qa-context/feedback/feedback_items.yaml
 !examples/pipe-manufacturing-demo/qa-context/feedback/PM_FEEDBACK_TEMPLATE.md
+!examples/pipe-manufacturing-demo/qa-context/quality/
+examples/pipe-manufacturing-demo/qa-context/quality/*
+!examples/pipe-manufacturing-demo/qa-context/quality/*.yaml
+!examples/pipe-manufacturing-demo/qa-context/trust_evidence.yaml
+!examples/pipe-manufacturing-demo/qa-context/trust_score.yaml
+!examples/pipe-manufacturing-demo/qa-context/reports/
+examples/pipe-manufacturing-demo/qa-context/reports/*
+!examples/pipe-manufacturing-demo/qa-context/reports/trust_score.md
+!examples/pipe-manufacturing-demo/qa-context/signoff/
+examples/pipe-manufacturing-demo/qa-context/signoff/*
+!examples/pipe-manufacturing-demo/qa-context/signoff/final_qa_signoff.md

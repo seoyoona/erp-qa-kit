@@ -6,7 +6,7 @@ from pathlib import Path
 from typing import Any
 
 from .constants import CONFIDENCE_VALUES
-from .errors import ErpqaError, UsageError
+from .errors import ErpqaError
 from .paths import qa_context_path, write_yaml_if_missing
 from .yaml_io import load_yaml
 

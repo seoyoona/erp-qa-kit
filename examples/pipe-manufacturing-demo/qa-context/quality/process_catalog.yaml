@@ -1,0 +1,52 @@
+processes:
+  - process_id: PROC-INV-001
+    module: DEMO
+    name: Inventory receipt
+    owner: qa-owner
+    release_scope: pipe-manufacturing-demo
+    steps:
+      - step_id: inventory-receipt
+        sequence: 1
+        screen_id: INV-RCV-001M
+        route: /inventory/receipts
+        api: POST /api/inventory/receipts
+        sp:
+          - usp_inventory_receipt
+        tables:
+          - inventory_movement
+          - item_stock
+        expected_state_change: received quantity creates an inventory movement
+  - process_id: PROC-PRD-001
+    module: DEMO
+    name: Production result
+    owner: qa-owner
+    release_scope: pipe-manufacturing-demo
+    steps:
+      - step_id: production-result
+        sequence: 1
+        screen_id: PRD-RSL-001M
+        route: /production/results
+        api: POST /api/production/results
+        sp:
+          - usp_production_result
+        tables:
+          - production_result
+          - inventory_movement
+        expected_state_change: good and defect quantities create production result movement
+  - process_id: PROC-SHP-001
+    module: DEMO
+    name: Shipment confirmation
+    owner: qa-owner
+    release_scope: pipe-manufacturing-demo
+    steps:
+      - step_id: shipment-confirmation
+        sequence: 1
+        screen_id: SHP-CFM-001M
+        route: /shipments/confirm
+        api: POST /api/shipments
+        sp:
+          - usp_shipment_confirm
+        tables:
+          - shipment
+          - inventory_movement
+        expected_state_change: confirmed shipment decreases available stock

@@ -23,8 +23,6 @@ from erpqa.adapters.extractors import (
 )
 from erpqa.adapters.extractors.registry import required_adapter_names
 from erpqa.cli import main
-from erpqa.core.compare import compare_contracts
-from erpqa.core.context import load_context
 from erpqa.core.errors import WriteOutsideQaContextError
 from erpqa.core.module_paths import module_output_path
 from erpqa.core.policy import confirm_policy_for_tests
