@@ -1,0 +1,42 @@
+change_set:
+  - path: frontend/app.js
+    type: route
+    impact:
+      - screen_route
+      - screen
+      - process
+      - test
+  - path: backend/app.py
+    type: backend_service
+    impact:
+      - service
+      - api
+      - process
+      - test
+impact_rules:
+  - change_type: route
+    maps_to:
+      - screen_route
+      - screen
+      - process
+      - test
+  - change_type: backend_service
+    maps_to:
+      - service
+      - api
+      - process
+      - test
+affected_screens:
+  - INV-RCV-001M
+  - PRD-RSL-001M
+  - SHP-CFM-001M
+affected_processes:
+  - PROC-INV-001
+  - PROC-PRD-001
+  - PROC-SHP-001
+affected_tests:
+  - TC-INV-001
+  - TC-INV-002
+  - TC-PRD-001
+  - TC-SHP-001
+  - TC-SHP-002

@@ -1,0 +1,46 @@
+runs:
+  - run_id: RUN-INV-001
+    test_case_id: TC-INV-001
+    runner: qa-owner
+    executed_at: '2026-06-30T10:00:00+09:00'
+    environment: local-demo
+    account: qa-demo-manual
+    fixture: UAT_DEMO_INV_001
+    evidence: manual/inventory-receipt.md
+    result: passed
+  - run_id: RUN-INV-002
+    test_case_id: TC-INV-002
+    runner: qa-owner
+    executed_at: '2026-06-30T10:05:00+09:00'
+    environment: local-demo
+    account: qa-demo-db-readonly
+    fixture: UAT_DEMO_INV_001
+    evidence: db/inventory-receipt.sql
+    result: passed
+  - run_id: RUN-PRD-001
+    test_case_id: TC-PRD-001
+    runner: qa-owner
+    executed_at: '2026-06-30T10:10:00+09:00'
+    environment: local-demo
+    account: qa-demo-browser
+    fixture: UAT_DEMO_PRD_001
+    evidence: browser/production-result.md
+    result: passed
+  - run_id: RUN-SHP-001
+    test_case_id: TC-SHP-001
+    runner: qa-owner
+    executed_at: '2026-06-30T10:15:00+09:00'
+    environment: local-demo
+    account: qa-demo-api
+    fixture: UAT_DEMO_SHP_001
+    evidence: api/shipment-confirmation.md
+    result: passed
+  - run_id: RUN-SHP-002
+    test_case_id: TC-SHP-002
+    runner: qa-owner
+    executed_at: '2026-06-30T10:20:00+09:00'
+    environment: local-demo
+    account: qa-demo-write-uat
+    fixture: UAT_DEMO_SHP_001
+    evidence: live/write-uat-shipment.md
+    result: passed

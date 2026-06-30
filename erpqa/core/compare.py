@@ -1,10 +1,8 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from pathlib import Path
 from typing import Any
 
-from .constants import SEVERITY_VALUES
 from .context import RunContext
 from .module_paths import module_contract_path, write_module_yaml
 from .yaml_io import load_yaml

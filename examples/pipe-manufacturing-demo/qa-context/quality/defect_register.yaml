@@ -1,0 +1,5 @@
+defects:
+  - defect_id: DEF-DEMO-001
+    severity: minor
+    state: closed
+    title: Demo evidence packet review item

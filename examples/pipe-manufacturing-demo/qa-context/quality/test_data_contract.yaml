@@ -1,0 +1,19 @@
+fixtures:
+  - fixture_id: FX-DEMO-001
+    prefix: UAT_DEMO_INV_
+    cleanup_actions:
+      - DELETE FROM inventory_movement WHERE key LIKE 'UAT_DEMO_INV_%'
+      - DELETE FROM item_stock WHERE key LIKE 'UAT_DEMO_INV_%'
+    residual_count: 0
+  - fixture_id: FX-DEMO-002
+    prefix: UAT_DEMO_PRD_
+    cleanup_actions:
+      - DELETE FROM production_result WHERE key LIKE 'UAT_DEMO_PRD_%'
+      - DELETE FROM inventory_movement WHERE key LIKE 'UAT_DEMO_PRD_%'
+    residual_count: 0
+  - fixture_id: FX-DEMO-003
+    prefix: UAT_DEMO_SHP_
+    cleanup_actions:
+      - DELETE FROM shipment WHERE key LIKE 'UAT_DEMO_SHP_%'
+      - DELETE FROM inventory_movement WHERE key LIKE 'UAT_DEMO_SHP_%'
+    residual_count: 0
